@@ -18,9 +18,16 @@
     * { box-sizing: border-box; margin: 0; padding: 0; }
     body { background: #F2F8F3; -webkit-tap-highlight-color: transparent; }
   </style>
+  <!-- ── CAMP API ─────────────────────────────────────────────────────────────
+       After deploying camp-worker.js as a Cloudflare Worker,
+       paste your worker URL below (e.g. https://camp-api.you.workers.dev).
+       Leave empty to use localStorage (works on a single device without setup).
+  ────────────────────────────────────────────────────────────────────────── -->
+  <script>window.CAMP_API = '';</script>
+  <script type="module" crossorigin src="/assets/launch-utTNcrZt.js"></script>
+  <link rel="modulepreload" crossorigin href="/assets/storage-D2HrKqsg.js">
 </head>
 <body>
   <div id="root"></div>
-  <script type="module" src="/src/launch/main.jsx"></script>
 </body>
 </html>

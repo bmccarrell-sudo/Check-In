@@ -1,0 +1,14 @@
+{
+  "name":             "ACFC Camp Check-In",
+  "short_name":       "Camp Check-In",
+  "description":      "A Catalyst For Change · Summer Camp Staff Portal",
+  "start_url":        "/",
+  "scope":            "/",
+  "display":          "standalone",
+  "orientation":      "portrait",
+  "background_color": "#FFF9E6",
+  "theme_color":      "#2D0840",
+  "icons": [
+    { "src": "/hub-icon.svg", "sizes": "any", "type": "image/svg+xml", "purpose": "any maskable" }
+  ]
+}
