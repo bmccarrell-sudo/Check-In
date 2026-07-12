@@ -1,0 +1,19 @@
+{
+  "name": "Launch Pad Leadership Check-In",
+  "short_name": "Launch Pad",
+  "description": "A Catalyst For Change \u00b7 Launch Pad Leadership Camp Management",
+  "start_url": "/launch.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#F2F8F3",
+  "theme_color": "#43A832",
+  "icons": [
+    {
+      "src": "/launch/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

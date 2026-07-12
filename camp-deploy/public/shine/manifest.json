@@ -1,0 +1,19 @@
+{
+  "name": "Shine Squad Check-In",
+  "short_name": "Shine Squad",
+  "description": "A Catalyst For Change \u00b7 Shine Squad Camp Management",
+  "start_url": "/shine.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FDF5F8",
+  "theme_color": "#E8175D",
+  "icons": [
+    {
+      "src": "/shine/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

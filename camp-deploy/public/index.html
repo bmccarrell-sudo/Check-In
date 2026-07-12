@@ -1,0 +1,249 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#2D0840" />
+  <link rel="manifest" href="/manifest.json" />
+  <title>A Catalyst For Change · Camp Check-In</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: 'Inter', system-ui, -apple-system, sans-serif;
+      background: #FFF9E6;
+      min-height: 100vh;
+      min-height: 100dvh;
+      display: flex;
+      flex-direction: column;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    /* ── Header ── */
+    header {
+      background: #2D0840;
+      padding: 20px 24px 18px;
+      text-align: center;
+      border-bottom: 4px solid #FFD700;
+    }
+
+    .org-name {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.18em;
+      color: #FFD700;
+      text-transform: uppercase;
+      margin-bottom: 4px;
+    }
+
+    .app-title {
+      font-size: 22px;
+      font-weight: 800;
+      color: #fff;
+      letter-spacing: 0.04em;
+    }
+
+    .app-sub {
+      font-size: 12px;
+      color: #C8A8E0;
+      margin-top: 3px;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+    }
+
+    /* ── Body ── */
+    main {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      padding: 32px 20px 24px;
+      gap: 18px;
+    }
+
+    .prompt {
+      font-size: 14px;
+      font-weight: 600;
+      color: #6B3A8E;
+      letter-spacing: 0.04em;
+      text-align: center;
+      text-transform: uppercase;
+    }
+
+    /* ── Camp cards ── */
+    .camp-link {
+      display: block;
+      width: 100%;
+      max-width: 400px;
+      text-decoration: none;
+      border-radius: 20px;
+      overflow: hidden;
+      box-shadow: 0 4px 20px rgba(0,0,0,0.12);
+      transition: transform 0.15s, box-shadow 0.15s;
+      -webkit-tap-highlight-color: transparent;
+    }
+
+    .camp-link:active {
+      transform: scale(0.97);
+      box-shadow: 0 2px 10px rgba(0,0,0,0.12);
+    }
+
+    /* ── Shine Squad card ── */
+    .shine {
+      background: linear-gradient(135deg, #F50058 0%, #E8175D 50%, #FF4081 100%);
+    }
+
+    /* ── Launch Pad card ── */
+    .launch {
+      background: linear-gradient(135deg, #2E7D32 0%, #43A832 50%, #66BB6A 100%);
+    }
+
+    .card-inner {
+      padding: 28px 28px 24px;
+      display: flex;
+      align-items: center;
+      gap: 20px;
+    }
+
+    .card-emoji {
+      font-size: 56px;
+      flex-shrink: 0;
+      filter: drop-shadow(0 2px 6px rgba(0,0,0,0.2));
+    }
+
+    .card-text { flex: 1; }
+
+    .card-name {
+      font-size: 26px;
+      font-weight: 900;
+      color: #fff;
+      letter-spacing: 0.02em;
+      line-height: 1.1;
+      text-shadow: 0 2px 8px rgba(0,0,0,0.2);
+    }
+
+    .card-sub {
+      font-size: 13px;
+      color: rgba(255,255,255,0.85);
+      margin-top: 5px;
+      font-weight: 500;
+      line-height: 1.4;
+    }
+
+    .card-arrow {
+      font-size: 28px;
+      color: rgba(255,255,255,0.7);
+      flex-shrink: 0;
+    }
+
+    /* ── Stripe at bottom of each card ── */
+    .card-stripe {
+      padding: 8px 28px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: 0.1em;
+      text-transform: uppercase;
+    }
+
+    .shine  .card-stripe { background: rgba(0,0,0,0.15); color: rgba(255,255,255,0.9); }
+    .launch .card-stripe { background: rgba(0,0,0,0.15); color: rgba(255,255,255,0.9); }
+
+    /* ── Info note ── */
+    .note {
+      font-size: 12px;
+      color: #9B7AB8;
+      text-align: center;
+      max-width: 320px;
+      line-height: 1.5;
+      padding: 0 16px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      background: #2D0840;
+      padding: 16px 24px;
+      text-align: center;
+    }
+
+    .footer-text {
+      font-size: 11px;
+      color: #9070B0;
+      letter-spacing: 0.06em;
+    }
+
+    .footer-text strong {
+      color: #FFD700;
+    }
+
+    /* ── Date/info banner ── */
+    .info-banner {
+      background: #2D0840;
+      color: #E8C8FF;
+      padding: 10px 20px;
+      text-align: center;
+      font-size: 12px;
+      font-weight: 500;
+      letter-spacing: 0.04em;
+    }
+
+    .info-banner strong { color: #FFD700; }
+  </style>
+</head>
+<body>
+
+  <header>
+    <div class="org-name">A Catalyst For Change</div>
+    <div class="app-title">Camp Check-In</div>
+    <div class="app-sub">Staff Portal · Summer 2025</div>
+  </header>
+
+  <div class="info-banner">
+    <strong>July 20–24, 2025</strong> &nbsp;·&nbsp; Dallas College, Mountain View Campus
+  </div>
+
+  <main>
+    <div class="prompt">Select your camp</div>
+
+    <!-- Shine Squad -->
+    <a href="/shine" class="camp-link shine">
+      <div class="card-inner">
+        <div class="card-emoji">⭐</div>
+        <div class="card-text">
+          <div class="card-name">Shine Squad</div>
+          <div class="card-sub">Cheer &amp; Dance Camp<br>Girls · 1st–5th Grade</div>
+        </div>
+        <div class="card-arrow">›</div>
+      </div>
+      <div class="card-stripe">Check-In · Restroom · Aftercare · Pickup</div>
+    </a>
+
+    <!-- Launch Pad -->
+    <a href="/launch" class="camp-link launch">
+      <div class="card-inner">
+        <div class="card-emoji">🚀</div>
+        <div class="card-text">
+          <div class="card-name">Launch Pad</div>
+          <div class="card-sub">Leadership Academy<br>Boys &amp; Girls · Ages 11–16</div>
+        </div>
+        <div class="card-arrow">›</div>
+      </div>
+      <div class="card-stripe">Check-In · Restroom · Aftercare · Pickup</div>
+    </a>
+
+    <p class="note">
+      Tap your camp above. Each camp has its own<br>
+      independent check-in system and data.
+    </p>
+  </main>
+
+  <footer>
+    <div class="footer-text">
+      <strong>A Catalyst For Change</strong> &nbsp;·&nbsp; acatalyst4changetx.org<br>
+      Empowering Youth · Building Futures
+    </div>
+  </footer>
+
+</body>
+</html>
