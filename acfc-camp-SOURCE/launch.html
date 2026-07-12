@@ -1,0 +1,32 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
+
+  <!-- PWA / Add to Homescreen -->
+  <meta name="apple-mobile-web-app-capable"           content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style"  content="black-translucent" />
+  <meta name="apple-mobile-web-app-title"             content="Launch Pad" />
+  <meta name="mobile-web-app-capable"                 content="yes" />
+  <meta name="theme-color"                            content="#43A832" />
+  <link rel="manifest"         href="/launch/manifest.json" />
+  <link rel="apple-touch-icon" href="/launch/icon.svg" />
+
+  <title>Launch Pad Leadership · Check-In</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body { background: #F2F8F3; -webkit-tap-highlight-color: transparent; }
+  </style>
+  <!-- ── CAMP API ─────────────────────────────────────────────────────────────
+       After deploying camp-worker.js as a Cloudflare Worker,
+       paste your worker URL below (e.g. https://camp-api.you.workers.dev).
+       Leave empty to use localStorage (works on a single device without setup).
+  ────────────────────────────────────────────────────────────────────────── -->
+  <script>window.CAMP_API = '';</script>
+</head>
+<body>
+  <div id="root"></div>
+  <script type="module" src="./src/launch/main.jsx"></script>
+</body>
+</html>
