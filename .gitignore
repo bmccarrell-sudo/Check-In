@@ -1,0 +1,13 @@
+# Built output — Cloudflare builds this itself, never commit it
+dist/
+
+# Dependencies — Cloudflare installs these itself
+node_modules/
+
+# Local env files
+.env
+.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
