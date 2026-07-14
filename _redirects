@@ -1,10 +1,19 @@
-# Cloudflare Pages URL rewrites
-# Serves the app without showing .html in the address bar
-# 200 = rewrite (URL stays clean, no browser redirect)
-
-/shine    /shine.html    200
-/launch   /launch.html   200
-
-# Redirect old .html URLs to clean versions (optional)
-/shine.html    /shine    301
-/launch.html   /launch   301
+{
+  "name": "Shine Squad Check-In",
+  "short_name": "Shine Squad",
+  "description": "A Catalyst For Change \u00b7 Shine Squad Camp Management",
+  "start_url": "/shine.html",
+  "scope": "/",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#FDF5F8",
+  "theme_color": "#E8175D",
+  "icons": [
+    {
+      "src": "/shine/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}

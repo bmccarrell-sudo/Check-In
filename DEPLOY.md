@@ -1,103 +1,64 @@
-# ACFC Camp Check-In · Cloudflare Direct Upload
+/**
+ * _worker.js — Cloudflare Pages Worker
+ *
+ * Handles KV read/write for the camp check-in apps.
+ * Static assets (HTML, JS, CSS) are served automatically via env.ASSETS.
+ *
+ * This file works with Cloudflare Pages Direct Upload.
+ * The CAMP_KV binding is configured in the Pages project settings.
+ */
 
-Two steps. No CLI, no build process.
+const CORS = {
+  "Content-Type":  "application/json",
+  "Cache-Control": "no-store",
+};
 
-─────────────────────────────────────────────────────────
-STEP 1 — Upload static files to Cloudflare Pages
-─────────────────────────────────────────────────────────
+export default {
+  async fetch(request, env) {
+    const url = new URL(request.url);
 
-1. Go to dash.cloudflare.com
-2. Left sidebar → Workers & Pages → Create application
-3. Click the Pages tab → Upload assets
-4. Name your project (e.g. acfc-camp-checkin)
-5. Upload THIS zip file
-6. Click Deploy site
+    // ── KV API routes ─────────────────────────────────────────────────────────
+    if (url.pathname.startsWith("/api/kv/")) {
+      const key = decodeURIComponent(url.pathname.slice("/api/kv/".length));
 
-Your hub page is live immediately at:
-  https://acfc-camp-checkin.pages.dev/
+      // GET — read a value
+      if (request.method === "GET") {
+        try {
+          const value = await env.CAMP_KV.get(key);
+          return new Response(value ?? "null", { headers: CORS });
+        } catch {
+          return new Response("null", { status: 500, headers: CORS });
+        }
+      }
 
-The apps work right now using each device's local storage.
-If you only use ONE device per camp, you're done.
+      // PUT — write a value
+      if (request.method === "PUT") {
+        try {
+          const body = await request.text();
+          await env.CAMP_KV.put(key, body);
+          return new Response('{"ok":true}', { headers: CORS });
+        } catch {
+          return new Response('{"ok":false}', { status: 500, headers: CORS });
+        }
+      }
 
-─────────────────────────────────────────────────────────
-STEP 2 — Add shared database (for multiple devices)
-─────────────────────────────────────────────────────────
+      // DELETE — remove a value
+      if (request.method === "DELETE") {
+        try {
+          await env.CAMP_KV.delete(key);
+          return new Response('{"ok":true}', { headers: CORS });
+        } catch {
+          return new Response('{"ok":false}', { status: 500, headers: CORS });
+        }
+      }
 
-This syncs data between all staff phones and tablets.
+      // OPTIONS — CORS preflight
+      if (request.method === "OPTIONS") {
+        return new Response(null, { headers: CORS });
+      }
+    }
 
-── 2a. Create a KV namespace ──
-
-1. Cloudflare dashboard → Workers & Pages → KV
-2. Create namespace → name it camp-kv → Add
-
-── 2b. Create the Worker ──
-
-1. Left sidebar → Workers & Pages → Create application
-2. Click the Workers tab → Create Worker
-3. Name it camp-api → Deploy
-4. Click "Edit code"
-5. Delete all the default code
-6. Open camp-worker.js from this zip → copy the entire file
-7. Paste it into the editor → click Save and deploy
-8. Note your worker URL: https://camp-api.YOUR-NAME.workers.dev
-
-── 2c. Bind KV to the Worker ──
-
-1. In the camp-api Worker → Settings → Bindings
-2. Add binding → KV Namespace
-   Variable name:  CAMP_KV
-   KV namespace:   camp-kv
-3. Save and deploy again
-
-── 2d. Connect the apps to the Worker ──
-
-Open shine.html from this zip in any text editor.
-Find this line (near the bottom of <head>):
-
-  window.CAMP_API = '';
-
-Change it to your worker URL:
-
-  window.CAMP_API = 'https://camp-api.YOUR-NAME.workers.dev';
-
-Do the same for launch.html.
-
-── 2e. Re-upload the two updated HTML files ──
-
-1. Your Pages project → Deployments → Create new deployment
-2. Upload JUST the two updated files:  shine.html  launch.html
-3. Deploy
-
-All devices now share the same live database.
-
-─────────────────────────────────────────────────────────
-YOUR URLS
-─────────────────────────────────────────────────────────
-
-  yourproject.pages.dev/         Hub — staff choose camp
-  yourproject.pages.dev/shine    Shine Squad Check-In
-  yourproject.pages.dev/launch   Launch Pad Check-In
-
-─────────────────────────────────────────────────────────
-ADD TO HOMESCREEN (PWA)
-─────────────────────────────────────────────────────────
-
-iPhone/iPad:  Safari → Share → Add to Home Screen
-Android:      Chrome → Menu (⋮) → Add to Home screen
-
-Opens full-screen, no browser bar, like a native app.
-
-─────────────────────────────────────────────────────────
-ADMIN PIN
-─────────────────────────────────────────────────────────
-
-Default PIN: 1234
-Change it inside either app after first login.
-Shine Squad and Launch Pad have independent PINs and data.
-
-─────────────────────────────────────────────────────────
-CUSTOM DOMAIN (optional)
-─────────────────────────────────────────────────────────
-
-Pages project → Custom domains → Add camp.acatalyst4changetx.org
-Cloudflare sets up SSL automatically. Free.
+    // ── Everything else → serve static files ─────────────────────────────────
+    return env.ASSETS.fetch(request);
+  },
+};

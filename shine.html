@@ -3,30 +3,1525 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
-
-  <!-- PWA / Add to Homescreen -->
-  <meta name="apple-mobile-web-app-capable"           content="yes" />
-  <meta name="apple-mobile-web-app-status-bar-style"  content="black-translucent" />
-  <meta name="apple-mobile-web-app-title"             content="Shine Squad" />
-  <meta name="mobile-web-app-capable"                 content="yes" />
-  <meta name="theme-color"                            content="#E8175D" />
-  <link rel="manifest"         href="/shine/manifest.json" />
+  <meta name="apple-mobile-web-app-capable" content="yes" />
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
+  <meta name="apple-mobile-web-app-title" content="Launch Pad" />
+  <meta name="mobile-web-app-capable" content="yes" />
+  <meta name="theme-color" content="#E8175D" />
+  <link rel="manifest" href="/shine/manifest.json" />
   <link rel="apple-touch-icon" href="/shine/icon.svg" />
-
   <title>Shine Squad · Check-In</title>
+  <script>
+    // Paste your Firebase Realtime Database URL below.
+    // Get it from: console.firebase.google.com → your project → Realtime Database
+    // Example: https://my-project-default-rtdb.firebaseio.com
+    window.FIREBASE_URL = 'https://ac4c-camp-check-in-default-rtdb.firebaseio.com';
+  </script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/jsqr/1.4.0/jsQR.min.js"></script>
   <style>
-    * { box-sizing: border-box; margin: 0; padding: 0; }
-    body { background: #FDF5F8; -webkit-tap-highlight-color: transparent; }
+    *{box-sizing:border-box;margin:0;padding:0;}
+    body{font-family:'Inter',system-ui,-apple-system,sans-serif;background:#FDF5F8;color:#0A180C;-webkit-tap-highlight-color:transparent;}
+    input,textarea,button{font-family:inherit;}
+    input::placeholder,textarea::placeholder{color:#8EA893;}
+    ::-webkit-scrollbar{width:4px;}
+    ::-webkit-scrollbar-thumb{background:#B4D8BA;border-radius:2px;}
+    button:hover:not(:disabled){opacity:0.88;}
+    button:active:not(:disabled){transform:scale(0.97);}
   </style>
-  <!-- ── CAMP API ─────────────────────────────────────────────────────────────
-       After deploying camp-worker.js as a Cloudflare Worker,
-       paste your worker URL below (e.g. https://camp-api.you.workers.dev).
-       Leave empty to use localStorage (works on a single device without setup).
-  ────────────────────────────────────────────────────────────────────────── -->
-  <script>window.CAMP_API = '';</script>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="./src/shine/main.jsx"></script>
+<div id="root"></div>
+<script type="module">
+// ── CONFIG ──────────────────────────────────────────────────────────────────
+const CAMP_ID   = 'shine';
+const CAMP_NAME = 'Shine Squad';
+const CAMP_ICON = '⭐';
+const THEME = {
+  bg:'#FDF5F8', surface:'#FDE8EF', card:'#FFFFFF', border:'#F5A7C0',
+  shadow:'0 1px 4px rgba(80,0,30,0.09)', text:'#1A040C', sub:'#6B0025',
+  muted:'#8A4060', navy:'#2D0840', green:'#E8175D', greenDk:'#A0003A',
+  blue:'#1565C0', blueDk:'#0D47A1', purple:'#6A1B9A', purpleDk:'#4A0D7A',
+  yellow:'#FFD700', yellowDk:'#7A6200', grey:'#C2C2C2', red:'#DC2626',
+  redBg:'#FEF2F2', redBdr:'#FECACA', alertBg:'#FFFBEB', alertBdr:'#F59E0B',
+  alertTxt:'#92400E',
+};
+const KEYS = {
+  campers:`${CAMP_ID}-v2-campers`, staff:`${CAMP_ID}-v2-staff`,
+  events:`${CAMP_ID}-v2-events`, staffEvents:`${CAMP_ID}-v2-staffEvents`,
+  adminPin:`${CAMP_ID}-v2-adminPin`, volunteers:`${CAMP_ID}-v2-volunteers`,
+};
+
+// ── SECTIONS campers can be checked into ───────────────────────────────────
+const SECTIONS = {
+  beforecare: { label:'Before Care',       icon:'🌅', color:THEME.purple,   dk:THEME.purpleDk },
+  arrived:    { label:'Camp Check-In',     icon:'✅', color:THEME.green,    dk:THEME.greenDk  },
+  restroom:   { label:'Potty Break',       icon:'🚻', color:THEME.yellow,   dk:THEME.yellowDk },
+  aftercare:  { label:'After Care',        icon:'🌙', color:THEME.purple,   dk:THEME.purpleDk },
+  medical:    { label:'Medical / Nurse',   icon:'🩺', color:THEME.red,      dk:THEME.red      },
+  activity:   { label:'Special Activity',  icon:'🎯', color:THEME.blue,     dk:THEME.blueDk   },
+  lunch:      { label:'Lunch',             icon:'🍽',  color:THEME.green,    dk:THEME.greenDk  },
+  checkout:   { label:'Checked Out',       icon:'🚪', color:THEME.red,      dk:THEME.red      },
+  pickup:     { label:'Parent Pickup',     icon:'🚗', color:THEME.sub,      dk:THEME.sub      },
+};
+
+// Status after an action
+const ACTION_TO_STATUS = {
+  beforecare:'beforecare', arrived:'arrived', restroom:'restroom',
+  'return':'arrived', aftercare:'aftercare', medical:'medical',
+  activity:'activity', lunch:'lunch', checkout:'out', pickup:'out', reenter:'arrived',
+};
+
+// Available next actions per current status
+const NEXT_ACTIONS = {
+  pending:    ['beforecare','arrived'],
+  beforecare: ['arrived','pickup'],
+  arrived:    ['restroom','aftercare','medical','activity','lunch','checkout','pickup'],
+  restroom:   ['return','checkout','pickup'],
+  aftercare:  ['checkout','pickup'],
+  medical:    ['return','checkout','pickup'],
+  activity:   ['return','checkout','pickup'],
+  lunch:      ['return','checkout','pickup'],
+  out:        ['reenter'],
+};
+
+// Action definitions (what label/icon to show on buttons)
+const ACTIONS = {
+  beforecare: { label:'Before Care Arrival',  icon:'🌅', color:THEME.purple,   dk:THEME.purpleDk, next:'beforecare' },
+  arrived:    { label:'Camp Check-In',        icon:'✅', color:THEME.green,    dk:THEME.greenDk,  next:'arrived'    },
+  restroom:   { label:'Potty Break',          icon:'🚻', color:THEME.yellow,   dk:THEME.yellowDk, next:'restroom'   },
+  return:     { label:'Return from Break',    icon:'↩',  color:THEME.green,    dk:THEME.greenDk,  next:'arrived'    },
+  aftercare:  { label:'After Care Check-In',  icon:'🌙', color:THEME.purple,   dk:THEME.purpleDk, next:'aftercare'  },
+  medical:    { label:'Medical / Nurse',      icon:'🩺', color:THEME.red,      dk:THEME.red,      next:'medical'    },
+  activity:   { label:'Special Activity',     icon:'🎯', color:THEME.blue,     dk:THEME.blueDk,   next:'activity'   },
+  lunch:      { label:'Lunch',                icon:'🍽',  color:THEME.green,    dk:THEME.greenDk,  next:'lunch'      },
+  checkout:   { label:'Check Out (Staff)',     icon:'🚪', color:THEME.red,      dk:THEME.red,      next:'out'        },
+  pickup:     { label:'Parent Pickup',        icon:'🚗', color:THEME.sub,      dk:THEME.sub,      next:'out'        },
+  reenter:    { label:'Re-enter Camp',        icon:'↩',  color:THEME.green,    dk:THEME.greenDk,  next:'arrived'    },
+};
+
+const STATUS_LABELS = {
+  pending:    { label:'Not Arrived',  color:THEME.muted,    dot:'○' },
+  beforecare: { label:'Before Care',  color:THEME.purpleDk, dot:'◑' },
+  arrived:    { label:'Present',      color:THEME.greenDk,  dot:'●' },
+  restroom:   { label:'Potty Break',  color:THEME.yellowDk, dot:'◉' },
+  aftercare:  { label:'After Care',   color:THEME.purpleDk, dot:'◑' },
+  medical:    { label:'Medical',      color:THEME.red,      dot:'◉' },
+  activity:   { label:'Activity',     color:THEME.blueDk,   dot:'◑' },
+  lunch:      { label:'Lunch',        color:THEME.greenDk,  dot:'◑' },
+  out:        { label:'Checked Out',  color:THEME.muted,    dot:'○' },
+};
+
+// ── STORAGE ──────────────────────────────────────────────────────────────────
+// Uses Firebase Realtime Database when window.FIREBASE_URL is set.
+// Falls back to localStorage for single-device use.
+function fbKey(key) { return key.replace(/[.#$[\]/]/g, '_'); }
+async function kvGet(key) {
+  const fb = window.FIREBASE_URL;
+  if (fb) {
+    try {
+      const r = await fetch(`${fb}/camp/${fbKey(key)}.json`);
+      return r.json();
+    } catch { return null; }
+  }
+  const v = localStorage.getItem(key);
+  return v ? JSON.parse(v) : null;
+}
+async function kvPut(key, value) {
+  const fb = window.FIREBASE_URL;
+  if (fb) {
+    try {
+      await fetch(`${fb}/camp/${fbKey(key)}.json`, {
+        method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify(value),
+      });
+    } catch {}
+    return;
+  }
+  localStorage.setItem(key, JSON.stringify(value));
+}
+
+// ── HELPERS ───────────────────────────────────────────────────────────────────
+const uid = () => `${Date.now()}_${Math.random().toString(36).slice(2,6)}`;
+const fmtDateTime = ts => new Date(ts).toLocaleDateString('en-US',{month:'short',day:'numeric'})
+  + ' · ' + new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+const fmtTime = ts => new Date(ts).toLocaleTimeString([],{hour:'2-digit',minute:'2-digit'});
+const minutesSince = ts => Math.floor((Date.now() - new Date(ts)) / 60000);
+const nowHHMM = () => { const d=new Date(); return `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`; };
+const camperStatus = (camperId, events) => {
+  const ev = [...events].filter(e=>e.camperId===camperId).sort((a,b)=>new Date(b.ts)-new Date(a.ts))[0];
+  if (!ev) return 'pending';
+  return ACTION_TO_STATUS[ev.action] ?? 'pending';
+};
+const qrUrl = (data, color='14172A') =>
+  `https://api.qrserver.com/v1/create-qr-code/?size=240x240&data=${encodeURIComponent(data)}&color=${color}&bgcolor=ffffff&margin=10`;
+const camperQR  = id => qrUrl('CAMP:'+id);
+const parentQR  = id => qrUrl('PARENT:'+id, '4E38B8');
+const staffQR   = id => qrUrl('STAFF:'+id);
+const volQR     = id => qrUrl('VOL:'+id);
+
+// ── REACTIVE STATE ────────────────────────────────────────────────────────────
+let STATE = {
+  view: 'home',         // home | scan | log | admin | vol
+  adminTab: 'campers',
+  loading: true,
+  adminUnlocked: false,
+  volUnlocked: false,
+  campers: [],
+  staff: [],
+  volunteers: [],
+  events: [],
+  staffEvents: [],
+  adminPin: '3570',
+  // volunteers have their own username/password list
+  // modal state
+  modal: null,  // null | {type, ...data}
+  confirmPin: null, // 'admin' | 'vol' | 'changePin' | 'newVol'
+  pinInput: '',
+  pinError: '',
+  pinStep: 'enter', // 'enter' | 'new' | 'confirm'
+  pinNewTemp: '',
+  search: '',
+  toast: null,
+  // vol login
+  volLoginUser: '',
+  volLoginPass: '',
+  volLoginError: '',
+  volUser: null,  // logged-in volunteer object
+};
+
+// Refs for camera
+let videoEl=null, canvasEl=null, scanRAF=null, scanStream=null, scanLocked=false;
+
+// ── RENDER ENGINE ─────────────────────────────────────────────────────────────
+function render() {
+  const root = document.getElementById('root');
+  root.innerHTML = '';
+  root.appendChild(buildApp());
+}
+
+// ── DATA LOAD ─────────────────────────────────────────────────────────────────
+async function loadData() {
+  const [campers, staff, volunteers, events, staffEvents, adminPin] = await Promise.all([
+    kvGet(KEYS.campers), kvGet(KEYS.staff), kvGet(KEYS.volunteers),
+    kvGet(KEYS.events), kvGet(KEYS.staffEvents), kvGet(KEYS.adminPin),
+  ]);
+  STATE.campers     = campers     || [];
+  STATE.staff       = staff       || [];
+  STATE.volunteers  = volunteers  || [];
+  STATE.events      = events      || [];
+  STATE.staffEvents = staffEvents || [];
+  STATE.adminPin    = adminPin    || '3570';
+  STATE.loading     = false;
+  render();
+}
+
+async function saveAndRender(key, val) {
+  await kvPut(key, val);
+  render();
+}
+
+// Poll every 8s for multi-device sync
+setInterval(async () => {
+  if (!window.FIREBASE_URL) return;
+  const [campers, staff, volunteers, events, staffEvents] = await Promise.all([
+    kvGet(KEYS.campers), kvGet(KEYS.staff), kvGet(KEYS.volunteers),
+    kvGet(KEYS.events), kvGet(KEYS.staffEvents),
+  ]);
+  STATE.campers     = campers     || STATE.campers;
+  STATE.staff       = staff       || STATE.staff;
+  STATE.volunteers  = volunteers  || STATE.volunteers;
+  STATE.events      = events      || STATE.events;
+  STATE.staffEvents = staffEvents || STATE.staffEvents;
+  render();
+}, 8000);
+
+// ── LOG AN EVENT ──────────────────────────────────────────────────────────────
+async function logEvent(camperId, action, note='') {
+  const camper = STATE.campers.find(c=>c.id===camperId);
+  if (!camper) return null;
+  const ev = { id:uid(), camperId, camperName:camper.name, action, note, ts:new Date().toISOString() };
+  const updated = [ev, ...STATE.events].slice(0, 5000);
+  STATE.events = updated;
+  await kvPut(KEYS.events, updated);
+  return ev;
+}
+
+// ── BUILD UI ──────────────────────────────────────────────────────────────────
+
+// Generic button
+function btn(label, onClick, opts={}) {
+  const b = document.createElement('button');
+  b.innerHTML = label;
+  Object.assign(b.style, {
+    padding: opts.small ? '8px 14px' : '12px 22px',
+    fontSize: opts.small ? '13px' : '14px',
+    fontWeight: '700',
+    borderRadius: '10px',
+    cursor: 'pointer',
+    fontFamily: 'inherit',
+    width: opts.full ? '100%' : undefined,
+    background: opts.ghost ? 'transparent' : (opts.color || THEME.green),
+    border: `1.5px solid ${opts.ghost ? THEME.border : (opts.color || THEME.green)}`,
+    color: opts.ghost ? THEME.muted : (opts.color===THEME.yellow||opts.color===THEME.green ? THEME.text : '#fff'),
+    marginTop: opts.mt || '0',
+    ...opts.style,
+  });
+  if (opts.ghost) b.style.color = opts.textColor || THEME.muted;
+  b.onclick = onClick;
+  return b;
+}
+
+// Input field
+function inp(placeholder, value, onChange, opts={}) {
+  const el = document.createElement(opts.area ? 'textarea' : 'input');
+  el.placeholder = placeholder;
+  el.value = value || '';
+  Object.assign(el.style, {
+    padding:'11px 14px', borderRadius:'10px',
+    border:`1.5px solid ${THEME.border}`, background:THEME.card,
+    color:THEME.text, fontSize:'15px', outline:'none',
+    width:'100%', boxSizing:'border-box',
+    ...(opts.area ? {resize:'vertical', height:'80px'} : {}),
+    ...opts.style,
+  });
+  el.oninput = e => onChange(e.target.value);
+  if (opts.onEnter) el.onkeydown = e => { if(e.key==='Enter') opts.onEnter(); };
+  return el;
+}
+
+// Card container
+function card(children, style={}) {
+  const d = document.createElement('div');
+  Object.assign(d.style, {
+    background:THEME.card, border:`1px solid ${THEME.border}`,
+    borderRadius:'14px', boxShadow:THEME.shadow, ...style,
+  });
+  children.forEach(c => c && d.appendChild(c));
+  return d;
+}
+
+// Pill badge
+function pill(text, color, dk) {
+  const s = document.createElement('span');
+  s.textContent = text;
+  Object.assign(s.style, {
+    display:'inline-block', fontSize:'11px', background:color+'22',
+    color:dk||color, border:`1px solid ${color}44`, padding:'2px 8px',
+    borderRadius:'10px', fontWeight:'700',
+  });
+  return s;
+}
+
+function div(style={}, ...children) {
+  const d = document.createElement('div');
+  Object.assign(d.style, style);
+  children.forEach(c => { if(c) d.appendChild(typeof c==='string' ? Object.assign(document.createElement('span'),{textContent:c}) : c); });
+  return d;
+}
+
+function text(content, style={}) {
+  const s = document.createElement('div');
+  s.innerHTML = content;
+  Object.assign(s.style, style);
+  return s;
+}
+
+// Show toast
+function showToast(msg, color=THEME.green) {
+  STATE.toast = { msg, color };
+  render();
+  setTimeout(() => { STATE.toast=null; render(); }, 2500);
+}
+
+// ── HEADER ────────────────────────────────────────────────────────────────────
+function buildHeader() {
+  const stats = computeStats();
+  const h = document.createElement('div');
+  Object.assign(h.style, {
+    background:THEME.navy, borderBottom:`3px solid ${THEME.green}`,
+    height:'58px', padding:'0 20px', display:'flex', alignItems:'center',
+    position:'sticky', top:'0', zIndex:'50',
+  });
+  h.innerHTML = `
+    <div style="display:flex;align-items:center;gap:10px">
+      <span style="font-size:22px">${CAMP_ICON}</span>
+      <div>
+        <div style="font-weight:800;font-size:15px;color:#fff;letter-spacing:0.02em">${CAMP_NAME}</div>
+        <div style="font-size:10px;color:#9BA3C0;letter-spacing:0.05em;text-transform:uppercase">Camp Check-In</div>
+      </div>
+    </div>
+    <div style="margin-left:auto;display:flex;gap:12px;font-size:12px;align-items:center">
+      <span style="color:#74C94A;font-weight:700">● ${stats.inCamp}</span>
+      <span style="color:${THEME.yellow};font-weight:700">🌙 ${stats.aftercare}</span>
+    </div>
+  `;
+  return h;
+}
+
+// ── BOTTOM NAV ────────────────────────────────────────────────────────────────
+function buildNav() {
+  const nav = document.createElement('div');
+  Object.assign(nav.style, {
+    position:'fixed', bottom:'0', left:'0', right:'0',
+    background:THEME.card, borderTop:`1px solid ${THEME.border}`,
+    display:'flex', zIndex:'100', boxShadow:'0 -2px 12px rgba(27,29,44,0.08)',
+    paddingBottom:'env(safe-area-inset-bottom)',
+  });
+  const tabs = [
+    ['home','📊','Home'],
+    ['scan','📷','Scan'],
+    ['log','📝','Log'],
+    ['admin','📋', STATE.adminUnlocked ? 'Admin' : 'Admin 🔒'],
+    ['vol','🙋', STATE.volUnlocked ? (STATE.volUser?.name?.split(' ')[0] || 'Volunteer') : 'Vol'],
+  ];
+  tabs.forEach(([id, icon, label]) => {
+    const active = STATE.view === id;
+    const b = document.createElement('button');
+    b.innerHTML = `<span style="font-size:22px;filter:${active?'none':'grayscale(0.4) opacity(0.6)'}">${icon}</span><span style="font-size:10px;font-weight:${active?700:500};color:${active?THEME.greenDk:THEME.muted}">${label}</span>`;
+    Object.assign(b.style, {
+      flex:'1', padding:'10px 4px 12px', background:'transparent', border:'none',
+      cursor:'pointer', display:'flex', flexDirection:'column', alignItems:'center', gap:'3px',
+    });
+    b.onclick = () => handleNavClick(id);
+    nav.appendChild(b);
+  });
+  return nav;
+}
+
+function handleNavClick(id) {
+  stopCamera();
+  if (id === 'admin') {
+    if (STATE.adminUnlocked) { STATE.view='admin'; render(); return; }
+    STATE.confirmPin='admin'; STATE.pinInput=''; STATE.pinError=''; STATE.pinStep='enter';
+    render(); return;
+  }
+  if (id === 'vol') {
+    if (STATE.volUnlocked) { STATE.view='vol'; render(); return; }
+    // Show volunteer login
+    STATE.modal = { type:'volLogin' }; render(); return;
+  }
+  STATE.view = id;
+  render();
+}
+
+// ── STATS ─────────────────────────────────────────────────────────────────────
+function computeStats() {
+  const statuses = {};
+  STATE.campers.forEach(c => { statuses[c.id] = camperStatus(c.id, STATE.events); });
+  return {
+    inCamp:    Object.values(statuses).filter(s=>['arrived','restroom','medical','activity','lunch'].includes(s)).length,
+    beforecare:Object.values(statuses).filter(s=>s==='beforecare').length,
+    aftercare: Object.values(statuses).filter(s=>s==='aftercare').length,
+    restroom:  Object.values(statuses).filter(s=>s==='restroom').length,
+    out:       Object.values(statuses).filter(s=>s==='out').length,
+    total:     STATE.campers.length,
+    statuses,
+  };
+}
+
+// ── HOME VIEW ─────────────────────────────────────────────────────────────────
+function buildHome() {
+  const stats = computeStats();
+  const wrap = document.createElement('div');
+
+  // Stat tiles
+  const tiles = [
+    ['● In Camp', stats.inCamp, THEME.greenDk],
+    [`${CAMP_ICON} Total`, stats.total, THEME.greenDk],
+    ['🚻 Break', stats.restroom, THEME.yellowDk],
+    ['🌅 Before Care', stats.beforecare, THEME.purpleDk],
+    ['🌙 After Care', stats.aftercare, THEME.purpleDk],
+    ['🚗 Out', stats.out, THEME.muted],
+  ];
+  const grid = document.createElement('div');
+  Object.assign(grid.style, {display:'grid', gridTemplateColumns:'repeat(3,1fr)', gap:'10px', marginBottom:'16px'});
+  tiles.forEach(([label, count, color]) => {
+    const c = card([
+      text(String(count), {fontSize:'26px',fontWeight:'800',color,lineHeight:'1',textAlign:'center'}),
+      text(label, {fontSize:'11px',color:THEME.muted,marginTop:'4px',textAlign:'center'}),
+    ], {padding:'14px 12px'});
+    grid.appendChild(c);
+  });
+  wrap.appendChild(grid);
+
+  // On restroom > 8 min alert
+  const onBreak = STATE.campers.filter(c=>stats.statuses[c.id]==='restroom');
+  if (onBreak.length) {
+    const bc = card([
+      text(`🚻 Potty Breaks <span style="font-size:11px;background:${THEME.yellow}44;color:${THEME.yellowDk};padding:1px 8px;border-radius:10px;font-weight:600;border:1px solid ${THEME.yellow}">${onBreak.length}</span>`,
+        {fontWeight:'700',fontSize:'13px',color:THEME.yellowDk,marginBottom:'10px'}),
+    ], {padding:'16px', marginBottom:'14px'});
+    onBreak.forEach(c => {
+      const sinceEv = STATE.events.find(e=>e.camperId===c.id&&e.action==='restroom');
+      const mins = sinceEv ? minutesSince(sinceEv.ts) : null;
+      const alert = mins !== null && mins >= 8;
+      const row = div({display:'flex',justifyContent:'space-between',alignItems:'center',
+        padding:'10px 12px',background:THEME.bg,borderRadius:'10px',
+        border:`1px solid ${alert?THEME.red+'55':THEME.border}`,marginTop:'7px'});
+      row.appendChild(div({flex:'1'},
+        text(`<b>${c.name}</b>`,{fontSize:'14px',color:THEME.text}),
+        c.allergies ? text(`⚠ ${c.allergies}`,{fontSize:'11px',color:THEME.alertTxt,fontWeight:'600'}) : null,
+      ));
+      if (mins!==null) row.appendChild(text(`${mins}m${alert?' ⚠':''}`,{fontSize:'16px',fontWeight:'800',color:alert?THEME.red:THEME.yellowDk}));
+      bc.appendChild(row);
+    });
+    wrap.appendChild(bc);
+  }
+
+  // Before care
+  const beforeCare = STATE.campers.filter(c=>stats.statuses[c.id]==='beforecare');
+  if (beforeCare.length) {
+    const bc = card([text(`🌅 Before Care (${beforeCare.length})`,{fontWeight:'700',fontSize:'13px',color:THEME.blueDk,marginBottom:'10px'})],{padding:'16px',marginBottom:'14px'});
+    beforeCare.forEach(c => {
+      const row = div({display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:THEME.bg,borderRadius:'10px',marginTop:'7px'});
+      row.appendChild(text(`<b>${c.name}</b>`,{fontSize:'14px',color:THEME.text}));
+      if(c.group) row.appendChild(text(c.group,{fontSize:'12px',color:THEME.muted}));
+      bc.appendChild(row);
+    });
+    wrap.appendChild(bc);
+  }
+
+  // After care
+  const afterCare = STATE.campers.filter(c=>stats.statuses[c.id]==='aftercare');
+  if (afterCare.length) {
+    const ac = card([text(`🌙 After Care (${afterCare.length})`,{fontWeight:'700',fontSize:'13px',color:THEME.purpleDk,marginBottom:'10px'})],{padding:'16px',marginBottom:'14px'});
+    afterCare.forEach(c => {
+      const row = div({display:'flex',justifyContent:'space-between',alignItems:'center',padding:'8px 12px',background:THEME.bg,borderRadius:'10px',marginTop:'7px'});
+      row.appendChild(text(`<b>${c.name}</b>`,{fontSize:'14px',color:THEME.text}));
+      if(c.group) row.appendChild(text(c.group,{fontSize:'12px',color:THEME.muted}));
+      ac.appendChild(row);
+    });
+    wrap.appendChild(ac);
+  }
+
+  // Medical
+  const medicals = STATE.campers.filter(c=>stats.statuses[c.id]==='medical');
+  if (medicals.length) {
+    const mc = card([text(`🩺 Medical / Nurse (${medicals.length})`,{fontWeight:'700',fontSize:'13px',color:THEME.red,marginBottom:'10px'})],
+      {padding:'16px',marginBottom:'14px',border:`2px solid ${THEME.red}55`});
+    medicals.forEach(c => {
+      const row = div({padding:'8px 12px',background:THEME.redBg,borderRadius:'10px',marginTop:'7px'});
+      row.appendChild(text(`<b>${c.name}</b>`,{fontSize:'14px',color:THEME.text}));
+      if(c.allergies) row.appendChild(text(`⚠ ${c.allergies}`,{fontSize:'11px',color:THEME.alertTxt,fontWeight:'600'}));
+      mc.appendChild(row);
+    });
+    wrap.appendChild(mc);
+  }
+
+  // Today's checkouts
+  const today = new Date().toDateString();
+  const todayOut = STATE.events.filter(e=>['checkout','pickup'].includes(e.action)&&new Date(e.ts).toDateString()===today);
+  if (todayOut.length) {
+    const oc = card([text(`Today's Checkouts (${todayOut.length})`,{fontWeight:'700',fontSize:'13px',color:THEME.text,marginBottom:'10px'})],{padding:'16px',marginBottom:'14px'});
+    todayOut.forEach(ev => {
+      const act = ACTIONS[ev.action];
+      const row = div({display:'flex',alignItems:'center',gap:'12px',padding:'8px 12px',background:THEME.bg,borderRadius:'10px',marginTop:'7px'});
+      row.appendChild(text(act?.icon||'',{fontSize:'18px'}));
+      row.appendChild(text(`<b>${ev.camperName}</b>`,{flex:'1',fontSize:'14px',color:THEME.text}));
+      row.appendChild(div({textAlign:'right'},
+        text(act?.label||ev.action,{fontSize:'12px',fontWeight:'600',color:act?.dk||THEME.sub}),
+        text(fmtTime(ev.ts),{fontSize:'11px',color:THEME.muted}),
+      ));
+      oc.appendChild(row);
+    });
+    wrap.appendChild(oc);
+  }
+
+  return wrap;
+}
+
+// ── SCAN VIEW ─────────────────────────────────────────────────────────────────
+function buildScan() {
+  const wrap = document.createElement('div');
+
+  // Last action toast
+  if (STATE.lastScanResult) {
+    const { name, action, ts } = STATE.lastScanResult;
+    const act = ACTIONS[action];
+    const nb = card([
+      div({display:'flex',alignItems:'center',gap:'12px'},
+        text(act?.icon||'✅',{fontSize:'24px'}),
+        div({},
+          text(`<b>${act?.label||action}</b> — ${name}`,{fontWeight:'700',fontSize:'15px',color:act?.dk||THEME.greenDk}),
+          text(fmtDateTime(ts),{fontSize:'12px',color:THEME.muted}),
+        ),
+      )
+    ], {padding:'14px 16px', marginBottom:'14px'});
+    wrap.appendChild(nb);
+  }
+
+  if (STATE.scanError) {
+    wrap.appendChild(card([text(`⚠ ${STATE.scanError}`,{color:THEME.red,fontSize:'14px',fontWeight:'500'})],
+      {padding:'12px 16px',marginBottom:'14px',background:THEME.redBg,border:`1.5px solid ${THEME.redBdr}`}));
+  }
+
+  // Camera box
+  const camBox = card([],{padding:'20px',marginBottom:'14px',textAlign:'center'});
+  if (STATE.scanActive) {
+    const vidWrap = div({position:'relative',borderRadius:'12px',overflow:'hidden',maxWidth:'400px',margin:'0 auto 14px'});
+    videoEl = document.createElement('video');
+    videoEl.muted = true; videoEl.playsInline = true;
+    Object.assign(videoEl.style, {width:'100%',display:'block',borderRadius:'12px'});
+    canvasEl = document.createElement('canvas');
+    canvasEl.style.display = 'none';
+    const overlay = div({position:'absolute',inset:'0',pointerEvents:'none',display:'flex',alignItems:'center',justifyContent:'center'});
+    const frame = div({width:'180px',height:'180px',borderRadius:'14px',border:`3px solid ${THEME.green}`,boxShadow:'0 0 0 9999px rgba(27,29,44,0.5)'});
+    overlay.appendChild(frame);
+    vidWrap.appendChild(videoEl); vidWrap.appendChild(canvasEl); vidWrap.appendChild(overlay);
+    camBox.appendChild(vidWrap);
+    camBox.appendChild(text('Staff badge · Camper QR · Parent code',{color:THEME.muted,fontSize:'14px',marginBottom:'14px'}));
+    camBox.appendChild(btn('Stop Camera', stopCamera, {color:THEME.red,full:true}));
+    // Start camera after DOM insert
+    setTimeout(startCamera, 80);
+  } else {
+    camBox.appendChild(text('📷',{fontSize:'60px',marginBottom:'12px'}));
+    camBox.appendChild(text('QR Scanner',{fontWeight:'800',color:THEME.text,fontSize:'18px',marginBottom:'6px'}));
+    camBox.appendChild(text('Reads staff badges, camper check-in QRs,<br>and parent pickup codes.',{color:THEME.muted,fontSize:'14px',marginBottom:'22px',lineHeight:'1.5'}));
+    camBox.appendChild(btn('Start Camera', startCameraUI, {style:{fontSize:'16px',padding:'14px 32px'}}));
+  }
+  wrap.appendChild(camBox);
+
+  // Manual list
+  const manual = card([],{padding:'18px'});
+  manual.appendChild(text('Manual Log',{fontSize:'12px',fontWeight:'700',color:THEME.muted,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:'12px'}));
+  const searchInp = inp('Search name…', STATE.search, v=>{STATE.search=v; render();});
+  searchInp.style.marginBottom = '12px';
+  manual.appendChild(searchInp);
+  setTimeout(()=>{ const s=document.querySelector('#scanSearch'); if(s)s.focus(); },50);
+  searchInp.id='scanSearch';
+
+  const q = STATE.search.toLowerCase();
+  const filteredCampers = STATE.campers.filter(c=>!q||c.name.toLowerCase().includes(q));
+  const filteredStaff   = STATE.staff.filter(s=>!q||s.name.toLowerCase().includes(q));
+  const filteredVols    = STATE.volunteers.filter(v=>!q||v.name.toLowerCase().includes(q));
+
+  if (filteredStaff.length) {
+    manual.appendChild(text('👷 Staff',{fontSize:'12px',color:THEME.purpleDk,fontWeight:'700',marginBottom:'8px'}));
+    filteredStaff.slice(0,5).forEach(s => {
+      const b = document.createElement('button');
+      b.innerHTML = `<span>👷</span><span style="font-weight:600;flex:1">${s.name}</span><span style="font-size:12px;color:${THEME.muted}">${s.role}</span>`;
+      Object.assign(b.style,{padding:'12px 14px',background:THEME.bg,border:`1px solid ${THEME.border}`,
+        color:THEME.text,borderRadius:'10px',cursor:'pointer',textAlign:'left',display:'flex',
+        alignItems:'center',gap:'10px',width:'100%',marginBottom:'7px',fontFamily:'inherit',fontSize:'14px'});
+      b.onclick = () => { STATE.modal={type:'staffClock',staff:s}; render(); };
+      manual.appendChild(b);
+    });
+  }
+
+  if (filteredVols.length) {
+    manual.appendChild(text('🙋 Volunteers',{fontSize:'12px',color:THEME.blue,fontWeight:'700',marginBottom:'8px',marginTop:'8px'}));
+    filteredVols.slice(0,5).forEach(v => {
+      const b = document.createElement('button');
+      b.innerHTML = `<span>🙋</span><span style="font-weight:600;flex:1">${v.name}</span>`;
+      Object.assign(b.style,{padding:'12px 14px',background:THEME.bg,border:`1px solid ${THEME.border}`,
+        color:THEME.text,borderRadius:'10px',cursor:'pointer',textAlign:'left',display:'flex',
+        alignItems:'center',gap:'10px',width:'100%',marginBottom:'7px',fontFamily:'inherit',fontSize:'14px'});
+      b.onclick = () => { STATE.modal={type:'staffClock',staff:{...v,role:'Volunteer'}}; render(); };
+      manual.appendChild(b);
+    });
+  }
+
+  if (filteredCampers.length) {
+    manual.appendChild(text(`${CAMP_ICON} Campers`,{fontSize:'12px',color:THEME.greenDk,fontWeight:'700',marginBottom:'8px',marginTop:'8px'}));
+    const listDiv = div({display:'grid',gap:'7px',maxHeight:'280px',overflowY:'auto'});
+    filteredCampers.forEach(c => {
+      const status = camperStatus(c.id, STATE.events);
+      const sl = STATUS_LABELS[status] || STATUS_LABELS.pending;
+      const b = document.createElement('button');
+      b.innerHTML = `
+        <div style="flex:1;text-align:left">
+          <div style="font-weight:600">${c.name}</div>
+          ${c.allergies?`<div style="font-size:11px;color:${THEME.alertTxt};font-weight:600">⚠ ${c.allergies}</div>`:''}
+        </div>
+        ${c.aftercare?`<span style="font-size:11px;color:${THEME.purpleDk}">🌙</span>`:''}
+        ${c.group?`<span style="color:${THEME.muted};font-size:12px">${c.group}</span>`:''}
+        <span style="font-size:12px;color:${sl.color};font-weight:600;flex-shrink:0">${sl.dot} ${sl.label}</span>
+      `;
+      Object.assign(b.style,{padding:'12px 14px',background:THEME.bg,
+        border:`1px solid ${c.allergies?THEME.alertBdr:THEME.border}`,color:THEME.text,
+        borderRadius:'10px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+        width:'100%',fontFamily:'inherit',fontSize:'14px'});
+      b.onclick = () => openCamperModal(c, false);
+      listDiv.appendChild(b);
+    });
+    manual.appendChild(listDiv);
+  }
+
+  wrap.appendChild(manual);
+  return wrap;
+}
+
+// ── LOG VIEW ──────────────────────────────────────────────────────────────────
+function buildLog() {
+  const wrap = document.createElement('div');
+  const topRow = div({display:'flex',justifyContent:'flex-end',marginBottom:'14px'});
+  topRow.appendChild(btn('↓ Export CSV', exportCSV, {ghost:true, small:true, textColor:THEME.sub}));
+  wrap.appendChild(topRow);
+
+  if (STATE.events.length === 0) {
+    wrap.appendChild(text('No events logged yet.',{textAlign:'center',color:THEME.muted,padding:'60px 0',fontSize:'15px'}));
+    return wrap;
+  }
+
+  const listDiv = div({display:'grid',gap:'8px'});
+  [...STATE.events].slice(0,200).forEach((ev,i) => {
+    const act = ACTIONS[ev.action];
+    const c = card([
+      div({display:'flex',alignItems:'flex-start',gap:'12px'},
+        text(act?.icon||'📝',{fontSize:'20px',width:'26px',flexShrink:'0',textAlign:'center'}),
+        div({flex:'1'},
+          text(`<b>${ev.camperName}</b>`,{fontWeight:'600',fontSize:'14px',color:THEME.text}),
+          ev.note ? text(`"${ev.note}"`,{fontSize:'12px',color:THEME.muted,marginTop:'2px',fontStyle:'italic'}) : null,
+        ),
+        div({textAlign:'right'},
+          text(act?.label||ev.action,{fontSize:'12px',fontWeight:'600',color:act?.dk||THEME.sub}),
+          text(fmtDateTime(ev.ts),{fontSize:'11px',color:THEME.muted}),
+        ),
+      )
+    ], {padding:'12px 16px', border:`1px solid ${i===0?THEME.green+'66':THEME.border}`});
+    listDiv.appendChild(c);
+  });
+  wrap.appendChild(listDiv);
+  return wrap;
+}
+
+// ── ADMIN VIEW ────────────────────────────────────────────────────────────────
+function buildAdmin() {
+  const wrap = document.createElement('div');
+
+  // Header row
+  const headerRow = div({display:'flex',alignItems:'center',justifyContent:'space-between',marginBottom:'18px',flexWrap:'wrap',gap:'10px'});
+  headerRow.appendChild(text('🔓 Admin Access',{fontSize:'13px',color:THEME.greenDk,fontWeight:'600'}));
+  const btnRow = div({display:'flex',gap:'8px',flexWrap:'wrap'});
+  btnRow.appendChild(btn('🔑 Change PIN', ()=>{ STATE.confirmPin='changePin'; STATE.pinInput=''; STATE.pinError=''; STATE.pinStep='enter'; render(); }, {small:true,ghost:true,textColor:THEME.purpleDk,style:{borderColor:THEME.purple}}));
+  btnRow.appendChild(btn('🔒 Lock', ()=>{ STATE.adminUnlocked=false; STATE.view='home'; render(); }, {small:true,ghost:true,textColor:THEME.red,style:{borderColor:THEME.redBdr}}));
+  headerRow.appendChild(btnRow);
+  wrap.appendChild(headerRow);
+
+  // Tab bar
+  const tabs = [['campers',`${CAMP_ICON} Campers`],['staff','👷 Staff'],['volunteers','🙋 Volunteers']];
+  const tabBar = div({display:'flex',gap:'8px',marginBottom:'20px'});
+  tabs.forEach(([id,label]) => {
+    const active = STATE.adminTab === id;
+    const b = document.createElement('button');
+    b.textContent = label;
+    Object.assign(b.style,{flex:'1',padding:'12px 8px',borderRadius:'12px',
+      border:`2px solid ${active?THEME.green:THEME.border}`,
+      background:active?THEME.green+'14':THEME.card,
+      color:active?THEME.greenDk:THEME.muted,
+      fontFamily:'inherit',cursor:'pointer',fontWeight:active?700:500,fontSize:'13px'});
+    b.onclick = ()=>{ STATE.adminTab=id; render(); };
+    tabBar.appendChild(b);
+  });
+  wrap.appendChild(tabBar);
+
+  if (STATE.adminTab === 'campers') wrap.appendChild(buildAdminCampers());
+  if (STATE.adminTab === 'staff')   wrap.appendChild(buildAdminStaff());
+  if (STATE.adminTab === 'volunteers') wrap.appendChild(buildAdminVolunteers());
+  return wrap;
+}
+
+// ADMIN: Campers tab
+function buildAdminCampers() {
+  const wrap = document.createElement('div');
+
+  // Add camper form
+  let formName='', formAge='', formGroup='', formParent='', formPhone='',
+      formEmergency='', formAllergies='', formMedical='', formBC=false, formAC=false;
+
+  const form = card([],{padding:'18px',marginBottom:'18px'});
+  form.appendChild(text('Add Camper',{fontSize:'11px',fontWeight:'700',color:THEME.greenDk,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:'14px'}));
+
+  const row1 = div({display:'flex',gap:'10px',marginBottom:'10px',flexWrap:'wrap'});
+  const nameI = inp('Camper full name *', formName, v=>formName=v, {onEnter:addCamper, style:{flex:'2 1 150px'}});
+  const ageI = inp('Age', formAge, v=>formAge=v, {style:{flex:'0 0 70px'}});
+  const groupI = inp('Group / Cabin', formGroup, v=>formGroup=v, {style:{flex:'1 1 100px'}});
+  row1.appendChild(nameI); row1.appendChild(ageI); row1.appendChild(groupI);
+  form.appendChild(row1);
+
+  const row2 = div({display:'flex',gap:'10px',marginBottom:'10px',flexWrap:'wrap'});
+  const parentI = inp('Parent / Guardian name', formParent, v=>formParent=v, {style:{flex:'1 1 160px'}});
+  const phoneI = inp('Emergency phone', formPhone, v=>formPhone=v, {style:{flex:'1 1 130px'}});
+  row2.appendChild(parentI); row2.appendChild(phoneI);
+  form.appendChild(row2);
+
+  const row3 = div({display:'flex',gap:'10px',marginBottom:'10px',flexWrap:'wrap'});
+  const emergI = inp('Emergency contact (if different)', formEmergency, v=>formEmergency=v, {style:{flex:'1 1 200px'}});
+  row3.appendChild(emergI);
+  form.appendChild(row3);
+
+  const row4 = div({display:'flex',gap:'10px',marginBottom:'10px',flexWrap:'wrap'});
+  const allergyI = inp('⚠ Allergies (e.g. Peanuts, Bees)', formAllergies, v=>formAllergies=v, {style:{flex:'1 1 180px'}});
+  const medI = inp('Medical notes', formMedical, v=>formMedical=v, {style:{flex:'1 1 180px'}});
+  row4.appendChild(allergyI); row4.appendChild(medI);
+  form.appendChild(row4);
+
+  const row5 = div({display:'flex',gap:'16px',marginBottom:'14px',alignItems:'center',flexWrap:'wrap'});
+  const bcLabel = document.createElement('label');
+  bcLabel.style.cssText='display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;color:'+THEME.sub+';user-select:none';
+  const bcCb = document.createElement('input'); bcCb.type='checkbox'; bcCb.checked=formBC;
+  bcCb.style.cssText='width:16px;height:16px;accent-color:'+THEME.purple;
+  bcCb.onchange = e=>formBC=e.target.checked;
+  bcLabel.appendChild(bcCb); bcLabel.appendChild(document.createTextNode('🌅 Before Care'));
+  const acLabel = document.createElement('label');
+  acLabel.style.cssText='display:flex;align-items:center;gap:6px;cursor:pointer;font-size:14px;color:'+THEME.sub+';user-select:none';
+  const acCb = document.createElement('input'); acCb.type='checkbox'; acCb.checked=formAC;
+  acCb.style.cssText='width:16px;height:16px;accent-color:'+THEME.purple;
+  acCb.onchange = e=>formAC=e.target.checked;
+  acLabel.appendChild(acCb); acLabel.appendChild(document.createTextNode('🌙 After Care'));
+  row5.appendChild(bcLabel); row5.appendChild(acLabel);
+  row5.appendChild(btn('+ Add Camper', addCamper, {color:THEME.green}));
+  form.appendChild(row5);
+
+  async function addCamper() {
+    const name = nameI.value.trim();
+    if (!name) return;
+    const camper = {
+      id:uid(), name, age:ageI.value.trim(), group:groupI.value.trim(),
+      parentName:parentI.value.trim(), parentPhone:phoneI.value.trim(),
+      emergencyContact:emergI.value.trim(), allergies:allergyI.value.trim(),
+      medicalNotes:medI.value.trim(), beforecare:bcCb.checked, aftercare:acCb.checked,
+      createdAt:new Date().toISOString(),
+    };
+    STATE.campers = [...STATE.campers, camper];
+    await kvPut(KEYS.campers, STATE.campers);
+    showToast(`Added ${name}`);
+  }
+  wrap.appendChild(form);
+
+  // Camper list
+  if (STATE.campers.length === 0) {
+    wrap.appendChild(text('No campers yet.',{textAlign:'center',color:THEME.muted,padding:'30px 0'}));
+    return wrap;
+  }
+
+  const listDiv = div({display:'grid',gap:'10px'});
+  STATE.campers.forEach(c => {
+    const status = camperStatus(c.id, STATE.events);
+    const sl = STATUS_LABELS[status] || STATUS_LABELS.pending;
+    const cCard = card([], {padding:'13px 16px', border:`1px solid ${c.allergies?THEME.alertBdr:THEME.border}`});
+
+    const inner = div({display:'flex',alignItems:'flex-start',gap:'12px'});
+
+    // QR thumb
+    const qrThumb = div({width:'54px',height:'54px',background:THEME.bg,borderRadius:'8px',
+      overflow:'hidden',flexShrink:'0',cursor:'pointer',border:`1px solid ${THEME.border}`});
+    qrThumb.innerHTML = `<img src="${camperQR(c.id)}" style="width:100%;height:100%;display:block" alt="">`;
+    qrThumb.onclick = ()=>{ STATE.modal={type:'camperQR',camper:c,qrMode:'camper'}; render(); };
+
+    const info = div({flex:'1',minWidth:'0'});
+    info.appendChild(text(`<b>${c.name}</b>${c.age?` · Age ${c.age}`:''}`,{fontWeight:'700',fontSize:'15px',color:THEME.text,marginBottom:'4px'}));
+
+    // Badges
+    const badges = div({display:'flex',gap:'6px',flexWrap:'wrap',marginBottom:'6px'});
+    if(c.beforecare) badges.appendChild(pill('🌅 BC',THEME.blue,THEME.blueDk));
+    if(c.aftercare)  badges.appendChild(pill('🌙 AC',THEME.purple,THEME.purpleDk));
+    if(c.group)      badges.appendChild(pill(c.group,THEME.grey,THEME.sub));
+    if(c.parentName) badges.appendChild(pill(`👤 ${c.parentName}`,THEME.grey,THEME.sub));
+    if(c.parentPhone)badges.appendChild(pill(`📞 ${c.parentPhone}`,THEME.grey,THEME.sub));
+    if(c.emergencyContact) badges.appendChild(pill(`🆘 ${c.emergencyContact}`,THEME.grey,THEME.sub));
+    info.appendChild(badges);
+
+    if(c.allergies) {
+      const aw = div({background:THEME.alertBg,border:`1.5px solid ${THEME.alertBdr}`,borderRadius:'8px',padding:'6px 10px',marginBottom:'6px'});
+      aw.appendChild(text(`⚠️ <b>Allergy:</b> ${c.allergies}`,{fontSize:'12px',color:THEME.alertTxt,fontWeight:'600'}));
+      info.appendChild(aw);
+    }
+    if(c.medicalNotes) {
+      info.appendChild(text(`🩺 ${c.medicalNotes}`,{fontSize:'11px',color:THEME.red,marginBottom:'4px'}));
+    }
+
+    // Editable allergies inline
+    const allergyEdit = inp('⚠ Add allergies…', c.allergies||'', async v=>{
+      c.allergies = v;
+      STATE.campers = STATE.campers.map(x=>x.id===c.id?{...x,allergies:v}:x);
+      await kvPut(KEYS.campers, STATE.campers);
+    }, {style:{fontSize:'12px',padding:'6px 10px',borderColor:c.allergies?THEME.alertBdr:THEME.border,
+        background:c.allergies?THEME.alertBg:'transparent',color:c.allergies?THEME.alertTxt:THEME.muted,
+        fontWeight:c.allergies?'600':'400'}});
+    info.appendChild(allergyEdit);
+
+    // Action buttons
+    const actBtns = div({display:'flex',flexDirection:'column',gap:'6px',alignItems:'flex-end',flexShrink:'0'});
+    actBtns.appendChild(text(`${sl.dot} ${sl.label}`,{fontSize:'11px',color:sl.color,fontWeight:'600',marginBottom:'2px'}));
+    actBtns.appendChild(btn('🎒 QR',()=>{ STATE.modal={type:'camperQR',camper:c,qrMode:'camper'}; render(); },{small:true,ghost:true,textColor:THEME.sub}));
+    actBtns.appendChild(btn('🚗 Parent',()=>{ STATE.modal={type:'camperQR',camper:c,qrMode:'parent'}; render(); },{small:true,style:{background:THEME.purple+'18',border:`1.5px solid ${THEME.purple}55`,color:THEME.purpleDk}}));
+    actBtns.appendChild(btn('Log',()=>openCamperModal(c,false),{small:true,color:THEME.green}));
+    actBtns.appendChild(btn('✕',async()=>{
+      if(!confirm(`Remove ${c.name}?`)) return;
+      STATE.campers = STATE.campers.filter(x=>x.id!==c.id);
+      await kvPut(KEYS.campers, STATE.campers); render();
+    },{small:true,ghost:true,textColor:THEME.red,style:{borderColor:THEME.redBdr}}));
+
+    inner.appendChild(qrThumb); inner.appendChild(info); inner.appendChild(actBtns);
+    cCard.appendChild(inner);
+    listDiv.appendChild(cCard);
+  });
+  wrap.appendChild(listDiv);
+  return wrap;
+}
+
+// ADMIN: Staff tab
+function buildAdminStaff() {
+  const wrap = document.createElement('div');
+  let formName='', formRole='Staff';
+
+  const form = card([],{padding:'18px',marginBottom:'18px'});
+  form.appendChild(text('Add Staff Member',{fontSize:'11px',fontWeight:'700',color:THEME.greenDk,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:'14px'}));
+
+  const roleRow = div({display:'flex',gap:'8px',marginBottom:'12px',flexWrap:'wrap'});
+  ['Staff','Lead','Counselor','Chaperone'].forEach(role => {
+    const active = formRole === role;
+    const rb = document.createElement('button');
+    rb.textContent = role;
+    Object.assign(rb.style,{padding:'7px 14px',borderRadius:'20px',border:`1.5px solid ${active?THEME.green:THEME.border}`,
+      background:active?THEME.green:'transparent',color:active?'#fff':THEME.muted,
+      fontSize:'13px',fontWeight:active?700:500,cursor:'pointer',fontFamily:'inherit'});
+    rb.onclick=()=>{ formRole=role; render(); };
+    roleRow.appendChild(rb);
+  });
+  form.appendChild(roleRow);
+
+  const row = div({display:'flex',gap:'10px'});
+  const nameI = inp('Full name', formName, v=>formName=v, {onEnter:addStaff, style:{flex:'1'}});
+  row.appendChild(nameI);
+  row.appendChild(btn('+ Add', addStaff, {color:THEME.green}));
+  form.appendChild(row);
+
+  async function addStaff() {
+    const name = nameI.value.trim();
+    if (!name) return;
+    STATE.staff = [...STATE.staff, {id:uid(),name,role:formRole,createdAt:new Date().toISOString()}];
+    await kvPut(KEYS.staff, STATE.staff);
+    showToast(`Added ${name}`);
+  }
+  wrap.appendChild(form);
+
+  if (STATE.staff.length === 0) {
+    wrap.appendChild(text('No staff yet.',{textAlign:'center',color:THEME.muted,padding:'30px 0'}));
+    return wrap;
+  }
+  const listDiv = div({display:'grid',gap:'10px'});
+  STATE.staff.forEach(s => {
+    const c = card([],{padding:'13px 16px'});
+    const row2 = div({display:'flex',alignItems:'center',gap:'14px'});
+    const qrThumb = div({width:'54px',height:'54px',background:THEME.bg,borderRadius:'8px',
+      overflow:'hidden',flexShrink:'0',cursor:'pointer',border:`1px solid ${THEME.border}`});
+    qrThumb.innerHTML = `<img src="${staffQR(s.id)}" style="width:100%;height:100%;display:block" alt="">`;
+    qrThumb.onclick=()=>{ STATE.modal={type:'staffQR',staff:s}; render(); };
+    const info = div({flex:'1'});
+    info.appendChild(text(`<b>${s.name}</b>`,{fontWeight:'700',fontSize:'15px',color:THEME.text}));
+    info.appendChild(text(s.role,{fontSize:'12px',color:THEME.greenDk,marginTop:'2px'}));
+    const btns = div({display:'flex',flexDirection:'column',gap:'6px',alignItems:'flex-end'});
+    btns.appendChild(btn('QR',()=>{ STATE.modal={type:'staffQR',staff:s}; render(); },{small:true,ghost:true,textColor:THEME.sub}));
+    btns.appendChild(btn('Clock',()=>{ STATE.modal={type:'staffClock',staff:s}; render(); },{small:true,color:THEME.green}));
+    btns.appendChild(btn('✕',async()=>{
+      STATE.staff=STATE.staff.filter(x=>x.id!==s.id);
+      await kvPut(KEYS.staff,STATE.staff); render();
+    },{small:true,ghost:true,textColor:THEME.red,style:{borderColor:THEME.redBdr}}));
+    row2.appendChild(qrThumb); row2.appendChild(info); row2.appendChild(btns);
+    c.appendChild(row2); listDiv.appendChild(c);
+  });
+  wrap.appendChild(listDiv);
+  return wrap;
+}
+
+// ADMIN: Volunteers tab
+function buildAdminVolunteers() {
+  const wrap = document.createElement('div');
+  let formName='', formUser='', formPass='';
+
+  const form = card([],{padding:'18px',marginBottom:'18px'});
+  form.appendChild(text('Add Volunteer Login',{fontSize:'11px',fontWeight:'700',color:THEME.greenDk,textTransform:'uppercase',letterSpacing:'0.1em',marginBottom:'6px'}));
+  form.appendChild(text('Volunteers can log camper activities after logging in with their username and passcode.',
+    {fontSize:'12px',color:THEME.muted,marginBottom:'14px',lineHeight:'1.5'}));
+
+  const row1=div({display:'flex',gap:'10px',marginBottom:'10px'});
+  const nameI=inp('Full name',formName,v=>formName=v,{style:{flex:'1'}});
+  row1.appendChild(nameI); form.appendChild(row1);
+
+  const row2=div({display:'flex',gap:'10px',marginBottom:'14px',flexWrap:'wrap'});
+  const userI=inp('Username',formUser,v=>formUser=v,{style:{flex:'1 1 120px'}});
+  const passI=inp('Passcode (4+ digits)',formPass,v=>formPass=v,{style:{flex:'1 1 140px'}});
+  passI.type='text'; passI.inputMode='numeric';
+  row2.appendChild(userI); row2.appendChild(passI); form.appendChild(row2);
+  form.appendChild(btn('+ Add Volunteer',async()=>{
+    const name=nameI.value.trim(),user=userI.value.trim(),pass=passI.value.trim();
+    if(!name||!user||!pass){showToast('Fill in all fields','#DC2626');return;}
+    STATE.volunteers=[...STATE.volunteers,{id:uid(),name,username:user,passcode:pass,createdAt:new Date().toISOString()}];
+    await kvPut(KEYS.volunteers,STATE.volunteers);
+    showToast(`Added ${name}`);
+  },{color:THEME.green}));
+  wrap.appendChild(form);
+
+  if(STATE.volunteers.length===0){
+    wrap.appendChild(text('No volunteers yet.',{textAlign:'center',color:THEME.muted,padding:'30px 0'}));
+    return wrap;
+  }
+  const listDiv=div({display:'grid',gap:'10px'});
+  STATE.volunteers.forEach(v=>{
+    const c=card([],{padding:'13px 16px'});
+    const row=div({display:'flex',alignItems:'center',gap:'14px'});
+    const qrThumb=div({width:'54px',height:'54px',background:THEME.bg,borderRadius:'8px',overflow:'hidden',flexShrink:'0',cursor:'pointer',border:`1px solid ${THEME.border}`});
+    qrThumb.innerHTML=`<img src="${volQR(v.id)}" style="width:100%;height:100%;display:block" alt="">`;
+    const info=div({flex:'1'});
+    info.appendChild(text(`<b>${v.name}</b>`,{fontWeight:'700',fontSize:'15px',color:THEME.text}));
+    info.appendChild(text(`@${v.username}`,{fontSize:'12px',color:THEME.muted,marginTop:'2px'}));
+
+    // Editable username / passcode
+    const editRow=div({display:'flex',gap:'8px',marginTop:'8px',flexWrap:'wrap'});
+    const eu=inp('Username',v.username,async nv=>{
+      v.username=nv;
+      STATE.volunteers=STATE.volunteers.map(x=>x.id===v.id?{...x,username:nv}:x);
+      await kvPut(KEYS.volunteers,STATE.volunteers);
+    },{style:{flex:'1 1 100px',fontSize:'12px',padding:'6px 10px'}});
+    const ep=inp('Passcode',v.passcode,async nv=>{
+      v.passcode=nv;
+      STATE.volunteers=STATE.volunteers.map(x=>x.id===v.id?{...x,passcode:nv}:x);
+      await kvPut(KEYS.volunteers,STATE.volunteers);
+    },{style:{flex:'1 1 100px',fontSize:'12px',padding:'6px 10px'}});
+    ep.type='text'; ep.inputMode='numeric';
+    editRow.appendChild(eu); editRow.appendChild(ep);
+    info.appendChild(editRow);
+
+    const btns=div({display:'flex',flexDirection:'column',gap:'6px',alignItems:'flex-end'});
+    btns.appendChild(btn('✕',async()=>{
+      STATE.volunteers=STATE.volunteers.filter(x=>x.id!==v.id);
+      await kvPut(KEYS.volunteers,STATE.volunteers); render();
+    },{small:true,ghost:true,textColor:THEME.red,style:{borderColor:THEME.redBdr}}));
+    row.appendChild(qrThumb); row.appendChild(info); row.appendChild(btns);
+    c.appendChild(row); listDiv.appendChild(c);
+  });
+  wrap.appendChild(listDiv);
+  return wrap;
+}
+
+// ── VOLUNTEER VIEW ────────────────────────────────────────────────────────────
+function buildVol() {
+  const wrap = document.createElement('div');
+  const vol = STATE.volUser;
+  wrap.appendChild(text(`🙋 Logged in as <b>${vol.name}</b>`,
+    {fontSize:'14px',color:THEME.greenDk,fontWeight:'600',marginBottom:'14px'}));
+  wrap.appendChild(btn('Log Out',()=>{ STATE.volUnlocked=false; STATE.volUser=null; STATE.view='home'; render(); },
+    {ghost:true,small:true,textColor:THEME.red,style:{borderColor:THEME.redBdr,marginBottom:'18px'}}));
+
+  // Simplified camper list for volunteers
+  wrap.appendChild(text('Select a camper to log activity:',{fontSize:'13px',color:THEME.muted,marginBottom:'12px'}));
+  const searchI = inp('Search camper…',STATE.search,v=>{STATE.search=v;render();});
+  searchI.style.marginBottom='12px';
+  wrap.appendChild(searchI);
+  const q=STATE.search.toLowerCase();
+  const filtered=STATE.campers.filter(c=>!q||c.name.toLowerCase().includes(q));
+  const listDiv=div({display:'grid',gap:'8px'});
+  filtered.forEach(c=>{
+    const status=camperStatus(c.id,STATE.events);
+    const sl=STATUS_LABELS[status]||STATUS_LABELS.pending;
+    const b=document.createElement('button');
+    b.innerHTML=`
+      <div style="flex:1;text-align:left">
+        <div style="font-weight:600">${c.name}</div>
+        ${c.allergies?`<div style="font-size:11px;color:${THEME.alertTxt};font-weight:600">⚠ ${c.allergies}</div>`:''}
+        ${c.group?`<div style="font-size:11px;color:${THEME.muted}">${c.group}</div>`:''}
+      </div>
+      <span style="font-size:12px;color:${sl.color};font-weight:600">${sl.dot} ${sl.label}</span>
+    `;
+    Object.assign(b.style,{padding:'12px 14px',background:THEME.bg,
+      border:`1px solid ${c.allergies?THEME.alertBdr:THEME.border}`,color:THEME.text,
+      borderRadius:'10px',cursor:'pointer',display:'flex',alignItems:'center',gap:'10px',
+      width:'100%',fontFamily:'inherit',fontSize:'14px',marginBottom:'0'});
+    b.onclick=()=>openCamperModal(c,false);
+    listDiv.appendChild(b);
+  });
+  wrap.appendChild(listDiv);
+  return wrap;
+}
+
+// ── CAMPER ACTIVITY MODAL ─────────────────────────────────────────────────────
+function openCamperModal(camper, isParentPickup) {
+  STATE.modal = { type: isParentPickup ? 'parentPickup' : 'camperActivity', camper, note:'' };
+  render();
+}
+
+function buildCamperActivityModal(m) {
+  const camper = m.camper;
+  const status = camperStatus(camper.id, STATE.events);
+  const sl = STATUS_LABELS[status] || STATUS_LABELS.pending;
+  const nextActions = NEXT_ACTIONS[status] || [];
+
+  const backdrop = div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.72)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:'300',padding:'0 14px 14px'});
+  backdrop.onclick = ()=>{ STATE.modal=null; render(); };
+
+  const box = div({background:THEME.card,border:`1px solid ${THEME.border}`,borderRadius:'22px',
+    padding:'24px 22px',width:'100%',maxWidth:'440px',boxShadow:'0 -4px 30px rgba(27,29,44,0.18)'});
+  box.onclick = e=>e.stopPropagation();
+
+  // Header
+  box.appendChild(text(`${CAMP_ICON} Camper Activity`,{fontSize:'10px',fontWeight:'700',color:THEME.greenDk,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'6px',textAlign:'center'}));
+  box.appendChild(text(`<b>${camper.name}</b>`,{fontWeight:'800',fontSize:'22px',color:THEME.text,textAlign:'center',marginBottom:'2px'}));
+  if(camper.group) box.appendChild(text(camper.group,{fontSize:'13px',color:THEME.muted,textAlign:'center',marginBottom:'4px'}));
+
+  // Camper details
+  const detailRows=[
+    camper.age ? `🎂 Age ${camper.age}` : null,
+    camper.parentName ? `👤 Parent: <b>${camper.parentName}</b>` : null,
+    camper.parentPhone ? `📞 ${camper.parentPhone}` : null,
+    camper.emergencyContact ? `🆘 Emergency: ${camper.emergencyContact}` : null,
+    camper.medicalNotes ? `🩺 Medical: ${camper.medicalNotes}` : null,
+  ].filter(Boolean);
+  if(detailRows.length){
+    const details=div({background:THEME.bg,borderRadius:'10px',padding:'10px 14px',marginBottom:'10px',marginTop:'8px'});
+    detailRows.forEach(r=>details.appendChild(text(r,{fontSize:'13px',color:THEME.sub,marginBottom:'3px',lineHeight:'1.4'})));
+    box.appendChild(details);
+  }
+
+  // Allergy alert
+  if(camper.allergies){
+    const aw=div({background:THEME.alertBg,border:`2px solid ${THEME.alertBdr}`,borderRadius:'12px',padding:'12px 14px',marginBottom:'10px'});
+    aw.appendChild(div({display:'flex',alignItems:'center',gap:'8px',marginBottom:'4px'},
+      text('⚠️',{fontSize:'20px'}),
+      text('ALLERGY ALERT',{fontWeight:'800',fontSize:'13px',color:THEME.alertTxt,letterSpacing:'0.08em'}),
+    ));
+    aw.appendChild(text(camper.allergies,{fontSize:'16px',fontWeight:'700',color:'#78350F',lineHeight:'1.4'}));
+    box.appendChild(aw);
+  }
+
+  // Current status badge
+  const statusBadge=div({textAlign:'center',marginBottom:'12px'});
+  statusBadge.appendChild(div({display:'inline-block',padding:'4px 14px',borderRadius:'20px',fontSize:'12px',fontWeight:'600',
+    background:sl.color+'22',color:sl.color,border:`1.5px solid ${sl.color}44`},
+    text(`${sl.dot} ${sl.label}`,{color:sl.color})));
+  box.appendChild(statusBadge);
+
+  // Note field
+  const noteWrap=div({marginBottom:'12px'});
+  noteWrap.appendChild(text('Note (optional)',{fontSize:'11px',color:THEME.muted,fontWeight:'600',textTransform:'uppercase',letterSpacing:'0.06em',marginBottom:'6px'}));
+  const noteI=inp('Add a note for this check-in…',m.note||'',v=>m.note=v,{area:true,style:{height:'60px',fontSize:'13px'}});
+  noteWrap.appendChild(noteI);
+  box.appendChild(noteWrap);
+
+  // Action buttons
+  const actWrap=div({display:'grid',gap:'10px',marginBottom:'10px'});
+  nextActions.forEach(actionKey=>{
+    const act=ACTIONS[actionKey];
+    if(!act) return;
+    const ab=document.createElement('button');
+    ab.innerHTML=`${act.icon}&nbsp;&nbsp;${act.label}`;
+    Object.assign(ab.style,{padding:'15px',borderRadius:'14px',fontFamily:'inherit',
+      border:`1.5px solid ${act.color}55`,background:act.color+'18',
+      color:act.color===THEME.yellow?THEME.yellowDk:act.dk,
+      cursor:'pointer',fontWeight:'700',fontSize:'16px',width:'100%'});
+    ab.onclick=async()=>{
+      const ev=await logEvent(camper.id,actionKey,noteI.value.trim());
+      STATE.lastScanResult={name:camper.name,action:actionKey,ts:ev.ts};
+      STATE.modal=null; scanLocked=false;
+      showToast(`${act.icon} ${act.label} — ${camper.name}`);
+    };
+    actWrap.appendChild(ab);
+  });
+  box.appendChild(actWrap);
+  box.appendChild(btn('Cancel',()=>{ STATE.modal=null; scanLocked=false; render(); },{full:true,ghost:true,textColor:THEME.muted}));
+
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+// ── PARENT PICKUP MODAL ───────────────────────────────────────────────────────
+function buildParentPickupModal(m) {
+  const camper = m.camper;
+  const status = camperStatus(camper.id, STATE.events);
+  const sl = STATUS_LABELS[status]||STATUS_LABELS.pending;
+
+  const backdrop=div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.75)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:'300',padding:'0 14px 14px'});
+  backdrop.onclick=()=>{ STATE.modal=null; render(); };
+  const box=div({background:THEME.card,border:`2px solid ${THEME.purple}55`,borderRadius:'22px',padding:'28px 22px',width:'100%',maxWidth:'440px',boxShadow:'0 -4px 30px rgba(27,29,44,0.18)'});
+  box.onclick=e=>e.stopPropagation();
+
+  box.appendChild(text('🚗 Parent Pickup',{fontSize:'10px',fontWeight:'700',color:THEME.purpleDk,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'8px',textAlign:'center'}));
+  box.appendChild(text(`<b>${camper.name}</b>`,{fontWeight:'800',fontSize:'24px',color:THEME.text,textAlign:'center',marginBottom:'4px'}));
+  if(camper.parentName) box.appendChild(text(`Expected: <b>${camper.parentName}</b>`,{fontSize:'14px',color:THEME.sub,textAlign:'center',marginBottom:'4px'}));
+  if(camper.parentPhone) box.appendChild(text(`📞 ${camper.parentPhone}`,{fontSize:'13px',color:THEME.muted,textAlign:'center',marginBottom:'8px'}));
+
+  if(camper.allergies){
+    const aw=div({background:THEME.alertBg,border:`2px solid ${THEME.alertBdr}`,borderRadius:'12px',padding:'10px 14px',marginBottom:'10px'});
+    aw.appendChild(text(`⚠️ <b>Allergy:</b> ${camper.allergies}`,{fontSize:'13px',color:THEME.alertTxt,fontWeight:'600'}));
+    box.appendChild(aw);
+  }
+
+  box.appendChild(div({background:THEME.bg,borderRadius:'12px',padding:'12px 14px',marginBottom:'16px',textAlign:'center',fontSize:'14px',color:THEME.sub,lineHeight:'1.5'},
+    text('Verify the parent or authorized guardian<br>is present before releasing this camper.',{color:THEME.sub})));
+
+  const noteI=inp('Note (optional)…',m.note||'',v=>m.note=v,{area:true,style:{height:'50px',fontSize:'13px',marginBottom:'12px'}});
+  box.appendChild(noteI);
+
+  const confirmBtn=document.createElement('button');
+  confirmBtn.innerHTML='🚗&nbsp;&nbsp;Confirm Parent Pickup';
+  Object.assign(confirmBtn.style,{width:'100%',padding:'19px',borderRadius:'16px',fontFamily:'inherit',marginBottom:'10px',
+    border:`1.5px solid ${THEME.purple}`,background:THEME.purple+'18',color:THEME.purpleDk,
+    cursor:'pointer',fontWeight:'800',fontSize:'19px'});
+  confirmBtn.onclick=async()=>{
+    const ev=await logEvent(camper.id,'pickup',noteI.value.trim());
+    STATE.lastScanResult={name:camper.name,action:'pickup',ts:ev.ts};
+    STATE.modal=null; scanLocked=false;
+    showToast(`🚗 Parent Pickup — ${camper.name}`);
+  };
+  box.appendChild(confirmBtn);
+  box.appendChild(btn('Cancel',()=>{ STATE.modal=null; scanLocked=false; render(); },{full:true,ghost:true,textColor:THEME.muted}));
+
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+// ── CAMPER QR MODAL ───────────────────────────────────────────────────────────
+function buildCamperQRModal(m) {
+  const {camper, qrMode} = m;
+  const backdrop=div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.78)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:'300',padding:'20px'});
+  backdrop.onclick=()=>{ STATE.modal=null; render(); };
+  const box=div({background:THEME.card,border:`1px solid ${THEME.border}`,borderRadius:'22px',padding:'28px 28px',textAlign:'center',maxWidth:'320px',width:'100%',boxShadow:'0 20px 60px rgba(27,29,44,0.25)'});
+  box.onclick=e=>e.stopPropagation();
+
+  box.appendChild(text(`<b>${camper.name}</b>`,{fontWeight:'800',fontSize:'20px',color:THEME.text,marginBottom:'2px'}));
+  if(camper.group) box.appendChild(text(camper.group,{fontSize:'13px',color:THEME.muted,marginBottom:'4px'}));
+
+  // Mode toggle
+  const modeRow=div({display:'flex',borderRadius:'12px',overflow:'hidden',border:`1px solid ${THEME.border}`,marginBottom:'16px',marginTop:'10px'});
+  [['camper',`${CAMP_ICON} Camper Badge`,'camper'],['parent','🚗 Parent Pickup','parent']].forEach(([mode,label])=>{
+    const active=qrMode===mode;
+    const b=document.createElement('button');
+    b.textContent=label;
+    Object.assign(b.style,{flex:'1',padding:'11px 6px',border:'none',fontFamily:'inherit',
+      background:active?(mode==='camper'?THEME.green:THEME.purple)+'18':'transparent',
+      color:active?(mode==='camper'?THEME.greenDk:THEME.purpleDk):THEME.muted,
+      fontSize:'12px',fontWeight:active?700:500,cursor:'pointer'});
+    b.onclick=()=>{ m.qrMode=mode; render(); };
+    modeRow.appendChild(b);
+  });
+  box.appendChild(modeRow);
+
+  const qrSrc=qrMode==='camper'?camperQR(camper.id):parentQR(camper.id);
+  const qrBorder=qrMode==='camper'?THEME.green:THEME.purple;
+  box.appendChild(div({background:THEME.bg,padding:'14px',borderRadius:'14px',display:'inline-block',marginBottom:'14px',border:`2px solid ${qrBorder}55`},
+    Object.assign(document.createElement('img'),{src:qrSrc,alt:'QR',style:'width:200px;height:200px;display:block'})));
+
+  box.appendChild(text(qrMode==='camper'?'Pin to lanyard. Staff scans to log activities.':'Print and give to parent. Staff scans at pickup.',
+    {fontSize:'12px',color:THEME.muted,marginBottom:'20px',lineHeight:'1.6'}));
+  box.appendChild(btn('Close',()=>{ STATE.modal=null; render(); },{full:true,ghost:true,textColor:THEME.sub}));
+
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+// ── STAFF QR MODAL ────────────────────────────────────────────────────────────
+function buildStaffQRModal(m) {
+  const {staff} = m;
+  const backdrop=div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.78)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:'300',padding:'20px'});
+  backdrop.onclick=()=>{ STATE.modal=null; render(); };
+  const box=div({background:THEME.card,borderRadius:'22px',padding:'28px 28px',textAlign:'center',maxWidth:'320px',width:'100%',boxShadow:'0 20px 60px rgba(27,29,44,0.25)'});
+  box.onclick=e=>e.stopPropagation();
+  box.appendChild(text(`<b>${staff.name}</b>`,{fontWeight:'800',fontSize:'20px',color:THEME.text,marginBottom:'2px'}));
+  box.appendChild(text(`${staff.role} · ${CAMP_NAME}`,{fontSize:'13px',color:THEME.greenDk,marginBottom:'18px'}));
+  box.appendChild(div({background:THEME.bg,padding:'14px',borderRadius:'14px',display:'inline-block',marginBottom:'14px',border:`2px solid ${THEME.green}55`},
+    Object.assign(document.createElement('img'),{src:staffQR(staff.id),alt:'QR',style:'width:200px;height:200px;display:block'})));
+  box.appendChild(text('Print and give to this staff member.<br>Scan to clock in or clock out.',{fontSize:'12px',color:THEME.muted,marginBottom:'20px',lineHeight:'1.6'}));
+  box.appendChild(btn('Close',()=>{ STATE.modal=null; render(); },{full:true,ghost:true,textColor:THEME.sub}));
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+// ── STAFF CLOCK MODAL ─────────────────────────────────────────────────────────
+function buildStaffClockModal(m) {
+  const {staff} = m;
+  if (!m.time) m.time = nowHHMM();
+
+  const backdrop=div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.72)',display:'flex',alignItems:'flex-end',justifyContent:'center',zIndex:'300',padding:'0 14px 14px'});
+  backdrop.onclick=()=>{ STATE.modal=null; render(); };
+  const box=div({background:THEME.card,border:`1px solid ${THEME.purple}44`,borderRadius:'22px',padding:'28px 22px',width:'100%',maxWidth:'440px',boxShadow:'0 -4px 30px rgba(27,29,44,0.18)'});
+  box.onclick=e=>e.stopPropagation();
+
+  box.appendChild(text('👷 Staff Clock In/Out',{fontSize:'10px',fontWeight:'700',color:THEME.purpleDk,letterSpacing:'0.12em',textTransform:'uppercase',marginBottom:'6px',textAlign:'center'}));
+  box.appendChild(text(`<b>${staff.name}</b>`,{fontWeight:'800',fontSize:'22px',color:THEME.text,textAlign:'center',marginBottom:'2px'}));
+  box.appendChild(text(`${staff.role} · ${CAMP_NAME}`,{fontSize:'13px',color:THEME.purpleDk,textAlign:'center',marginBottom:'16px'}));
+
+  const timeWrap=div({background:THEME.bg,borderRadius:'12px',padding:'14px 16px',marginBottom:'16px'});
+  const timeI=document.createElement('input');
+  timeI.type='time'; timeI.value=m.time;
+  Object.assign(timeI.style,{width:'100%',padding:'12px',borderRadius:'10px',border:`1.5px solid ${THEME.border}`,
+    background:THEME.card,color:THEME.text,fontSize:'24px',outline:'none',fontFamily:'inherit',textAlign:'center'});
+  timeI.onchange=e=>m.time=e.target.value;
+  timeWrap.appendChild(timeI);
+  timeWrap.appendChild(text('Adjust if logging retroactively',{fontSize:'11px',color:THEME.muted,marginTop:'6px',textAlign:'center'}));
+  box.appendChild(timeWrap);
+
+  const clockIn=document.createElement('button');
+  clockIn.innerHTML='⏰&nbsp;&nbsp;Clock In';
+  Object.assign(clockIn.style,{width:'100%',padding:'17px',borderRadius:'14px',fontFamily:'inherit',marginBottom:'10px',
+    border:`1.5px solid ${THEME.green}55`,background:THEME.green+'18',color:THEME.greenDk,cursor:'pointer',fontWeight:'800',fontSize:'18px'});
+  clockIn.onclick=async()=>{
+    const ev={id:uid(),staffId:staff.id,staffName:staff.name,role:staff.role,action:'clockin',
+      ts:(() => { const [h,mn]=m.time.split(':').map(Number); const d=new Date(); d.setHours(h,mn,0,0); return d.toISOString(); })()};
+    const updated=[ev,...(STATE.staffEvents||[])].slice(0,2000);
+    STATE.staffEvents=updated; await kvPut(KEYS.staffEvents,updated);
+    STATE.modal=null; showToast(`⏰ Clocked In — ${staff.name}`);
+  };
+
+  const clockOut=document.createElement('button');
+  clockOut.innerHTML='⏹&nbsp;&nbsp;Clock Out';
+  Object.assign(clockOut.style,{width:'100%',padding:'17px',borderRadius:'14px',fontFamily:'inherit',marginBottom:'10px',
+    border:`1.5px solid ${THEME.redBdr}`,background:THEME.redBg,color:THEME.red,cursor:'pointer',fontWeight:'800',fontSize:'18px'});
+  clockOut.onclick=async()=>{
+    const ev={id:uid(),staffId:staff.id,staffName:staff.name,role:staff.role,action:'clockout',
+      ts:(() => { const [h,mn]=m.time.split(':').map(Number); const d=new Date(); d.setHours(h,mn,0,0); return d.toISOString(); })()};
+    const updated=[ev,...(STATE.staffEvents||[])].slice(0,2000);
+    STATE.staffEvents=updated; await kvPut(KEYS.staffEvents,updated);
+    STATE.modal=null; showToast(`⏹ Clocked Out — ${staff.name}`);
+  };
+
+  box.appendChild(clockIn); box.appendChild(clockOut);
+  box.appendChild(btn('Cancel',()=>{ STATE.modal=null; render(); },{full:true,ghost:true,textColor:THEME.muted}));
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+// ── VOLUNTEER LOGIN MODAL ─────────────────────────────────────────────────────
+function buildVolLoginModal() {
+  const backdrop=div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.85)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:'500',padding:'20px'});
+  backdrop.onclick=()=>{ STATE.modal=null; render(); };
+  const box=div({background:THEME.card,borderRadius:'24px',padding:'36px 28px',width:'100%',maxWidth:'320px',boxShadow:'0 20px 60px rgba(27,29,44,0.3)'});
+  box.onclick=e=>e.stopPropagation();
+
+  box.appendChild(text('🙋',{fontSize:'36px',textAlign:'center',marginBottom:'10px'}));
+  box.appendChild(text('Volunteer Login',{fontWeight:'800',fontSize:'20px',color:THEME.text,textAlign:'center',marginBottom:'6px'}));
+  box.appendChild(text('Enter your username and passcode',{fontSize:'13px',color:THEME.muted,textAlign:'center',marginBottom:'22px'}));
+
+  const userI=inp('Username',STATE.volLoginUser,v=>STATE.volLoginUser=v);
+  userI.style.marginBottom='10px'; userI.autocomplete='username';
+  const passI=inp('Passcode',STATE.volLoginPass,v=>STATE.volLoginPass=v);
+  passI.type='password'; passI.style.marginBottom='16px';
+
+  if(STATE.volLoginError) box.appendChild(text(STATE.volLoginError,{color:THEME.red,fontSize:'13px',fontWeight:'600',textAlign:'center',marginBottom:'10px'}));
+
+  const loginBtn=btn('Log In',()=>{
+    const vol=STATE.volunteers.find(v=>v.username===STATE.volLoginUser&&v.passcode===STATE.volLoginPass);
+    if(vol){
+      STATE.volUnlocked=true; STATE.volUser=vol; STATE.volLoginError='';
+      STATE.volLoginUser=''; STATE.volLoginPass=''; STATE.modal=null; STATE.view='vol'; render();
+    } else {
+      STATE.volLoginError='Incorrect username or passcode.'; render();
+    }
+  },{full:true,color:THEME.green});
+
+  box.appendChild(userI); box.appendChild(passI); box.appendChild(loginBtn);
+  box.appendChild(btn('Cancel',()=>{ STATE.modal=null; render(); },{full:true,ghost:true,textColor:THEME.muted,style:{marginTop:'10px'}}));
+
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+// ── PIN DIALOGS ───────────────────────────────────────────────────────────────
+function buildPinModal() {
+  const backdrop=div({position:'fixed',inset:'0',background:'rgba(27,29,44,0.85)',display:'flex',alignItems:'center',justifyContent:'center',zIndex:'500',padding:'20px'});
+  const box=div({background:THEME.card,borderRadius:'24px',padding:'36px 28px',width:'100%',maxWidth:'320px',boxShadow:'0 20px 60px rgba(27,29,44,0.3)'});
+
+  const isChange=STATE.confirmPin==='changePin';
+  const titles={enter:isChange?'Current PIN':'Admin Access',new:'New PIN',confirm:'Confirm New PIN'};
+
+  box.appendChild(text('🔒',{fontSize:'36px',textAlign:'center',marginBottom:'10px'}));
+  box.appendChild(text(titles[STATE.pinStep]||'Admin Access',{fontWeight:'800',fontSize:'20px',color:THEME.text,textAlign:'center',marginBottom:'4px'}));
+  box.appendChild(text('Enter 4-digit PIN',{fontSize:'13px',color:THEME.muted,textAlign:'center',marginBottom:'22px'}));
+
+  if(STATE.pinError) box.appendChild(text(STATE.pinError,{color:THEME.red,fontSize:'13px',fontWeight:'600',textAlign:'center',marginBottom:'10px'}));
+
+  const dots=div({display:'flex',justifyContent:'center',gap:'16px',marginBottom:'28px'});
+  [0,1,2,3].forEach(i=>{
+    const dot=div({width:'16px',height:'16px',borderRadius:'50%',transition:'all 0.15s',
+      background:STATE.pinError?THEME.red:i<STATE.pinInput.length?THEME.green:THEME.border});
+    dots.appendChild(dot);
+  });
+  box.appendChild(dots);
+
+  const grid=div({display:'grid',gridTemplateColumns:'repeat(3,1fr)',gap:'12px',marginBottom:'16px'});
+  [1,2,3,4,5,6,7,8,9,'',0,'⌫'].forEach((k,i)=>{
+    if(k===''){grid.appendChild(div({}));return;}
+    const b=document.createElement('button');
+    b.textContent=String(k);
+    Object.assign(b.style,{padding:'18px 0',borderRadius:'12px',border:`1.5px solid ${THEME.border}`,
+      background:k==='⌫'?THEME.surface:THEME.card,color:THEME.text,fontSize:k==='⌫'?'20px':'22px',
+      fontWeight:'600',cursor:'pointer',fontFamily:'inherit'});
+    b.onclick=()=>{
+      if(k==='⌫'){ STATE.pinInput=STATE.pinInput.slice(0,-1); STATE.pinError=''; render(); return; }
+      const next=STATE.pinInput+String(k);
+      STATE.pinInput=next;
+      if(next.length===4) handlePin(next);
+      else render();
+    };
+    grid.appendChild(b);
+  });
+  box.appendChild(grid);
+
+  box.appendChild(btn('Cancel',()=>{ STATE.confirmPin=null; STATE.pinInput=''; STATE.pinError=''; render(); },{full:true,ghost:true,textColor:THEME.muted}));
+  backdrop.appendChild(box);
+  return backdrop;
+}
+
+function handlePin(entered) {
+  const stored=STATE.adminPin;
+  if(STATE.confirmPin==='admin'){
+    if(entered===stored){
+      STATE.adminUnlocked=true; STATE.confirmPin=null; STATE.pinInput=''; STATE.view='admin'; render();
+    } else {
+      STATE.pinError='Incorrect PIN'; STATE.pinInput='';
+      setTimeout(()=>{ STATE.pinError=''; render(); },700);
+      render();
+    }
+    return;
+  }
+  if(STATE.confirmPin==='changePin'){
+    if(STATE.pinStep==='enter'){
+      if(entered===stored){ STATE.pinStep='new'; STATE.pinInput=''; render(); }
+      else { STATE.pinError='Incorrect PIN'; STATE.pinInput=''; setTimeout(()=>{ STATE.pinError=''; render(); },700); render(); }
+    } else if(STATE.pinStep==='new'){
+      STATE.pinNewTemp=entered; STATE.pinStep='confirm'; STATE.pinInput=''; render();
+    } else {
+      if(entered===STATE.pinNewTemp){
+        kvPut(KEYS.adminPin,entered); STATE.adminPin=entered;
+        STATE.confirmPin=null; STATE.pinInput=''; STATE.pinStep='enter'; STATE.pinNewTemp='';
+        showToast('✅ PIN updated');
+      } else {
+        STATE.pinError="PINs don't match"; STATE.pinInput=''; STATE.pinStep='new'; STATE.pinNewTemp='';
+        setTimeout(()=>{ STATE.pinError=''; render(); },700); render();
+      }
+    }
+    return;
+  }
+}
+
+// ── CAMERA ────────────────────────────────────────────────────────────────────
+function startCameraUI() {
+  STATE.scanActive=true; STATE.scanError=null; STATE.lastScanResult=null; render();
+}
+
+async function startCamera() {
+  try {
+    const stream=await navigator.mediaDevices.getUserMedia({video:{facingMode:'environment',width:{ideal:1280}}});
+    scanStream=stream;
+    if(videoEl){ videoEl.srcObject=stream; videoEl.onloadedmetadata=()=>{ videoEl.play(); scanFrame(); }; }
+  } catch { STATE.scanError='Camera access denied. Use the manual list below.'; render(); }
+}
+
+function stopCamera() {
+  if(scanStream){ scanStream.getTracks().forEach(t=>t.stop()); scanStream=null; }
+  if(scanRAF){ cancelAnimationFrame(scanRAF); scanRAF=null; }
+  videoEl=null; canvasEl=null;
+  STATE.scanActive=false; scanLocked=false;
+}
+
+function scanFrame() {
+  if(!videoEl||!canvasEl) return;
+  if(videoEl.readyState===videoEl.HAVE_ENOUGH_DATA){
+    canvasEl.width=videoEl.videoWidth; canvasEl.height=videoEl.videoHeight;
+    const ctx=canvasEl.getContext('2d',{willReadFrequently:true});
+    ctx.drawImage(videoEl,0,0);
+    if(!scanLocked&&typeof jsQR!=='undefined'){
+      const img=ctx.getImageData(0,0,canvasEl.width,canvasEl.height);
+      const code=jsQR(img.data,img.width,img.height);
+      if(code?.data) handleQRScan(code.data);
+    }
+  }
+  scanRAF=requestAnimationFrame(scanFrame);
+}
+
+function handleQRScan(data) {
+  scanLocked=true;
+  if(data.startsWith('CAMP:')){
+    const id=data.slice(5);
+    const camper=STATE.campers.find(c=>c.id===id);
+    if(camper){ STATE.modal={type:'camperActivity',camper,note:''}; render(); return; }
+  }
+  if(data.startsWith('PARENT:')){
+    const id=data.slice(7);
+    const camper=STATE.campers.find(c=>c.id===id);
+    if(camper){ STATE.modal={type:'parentPickup',camper,note:''}; render(); return; }
+  }
+  if(data.startsWith('STAFF:')){
+    const id=data.slice(6);
+    const staff=STATE.staff.find(s=>s.id===id)||STATE.volunteers.find(v=>v.id===id);
+    if(staff){ STATE.modal={type:'staffClock',staff}; render(); return; }
+  }
+  STATE.scanError='QR not recognized. Use the manual list below.';
+  setTimeout(()=>{ STATE.scanError=null; scanLocked=false; render(); },2500);
+  render();
+}
+
+// ── EXPORT CSV ────────────────────────────────────────────────────────────────
+function exportCSV() {
+  const rows=['Name,Group,Age,Allergies,Action,Note,Time'];
+  STATE.events.forEach(ev=>{
+    const c=STATE.campers.find(x=>x.id===ev.camperId);
+    const act=ACTIONS[ev.action]?.label||ev.action;
+    rows.push(`"${ev.camperName}","${c?.group||''}","${c?.age||''}","${c?.allergies||''}","${act}","${ev.note||''}","${fmtDateTime(ev.ts)}"`);
+  });
+  const a=document.createElement('a');
+  a.href=URL.createObjectURL(new Blob([rows.join('\n')],{type:'text/csv'}));
+  a.download=`${CAMP_ID}-log-${new Date().toISOString().slice(0,10)}.csv`;
+  a.click();
+}
+
+// ── MAIN APP BUILD ────────────────────────────────────────────────────────────
+function buildApp() {
+  if(STATE.loading){
+    const d=document.createElement('div');
+    Object.assign(d.style,{background:THEME.bg,height:'100vh',display:'flex',alignItems:'center',justifyContent:'center',fontFamily:'system-ui'});
+    d.innerHTML=`<span style="color:${THEME.greenDk};font-weight:700;font-size:16px">${CAMP_ICON} Loading…</span>`;
+    return d;
+  }
+
+  const app=document.createElement('div');
+  Object.assign(app.style,{background:THEME.bg,minHeight:'100vh',fontFamily:"'Inter',system-ui,sans-serif",color:THEME.text,paddingBottom:'72px'});
+
+  app.appendChild(buildHeader());
+
+  const content=document.createElement('div');
+  Object.assign(content.style,{maxWidth:'600px',margin:'0 auto',padding:'20px 14px 0'});
+
+  if(STATE.view==='home')  content.appendChild(buildHome());
+  if(STATE.view==='scan')  content.appendChild(buildScan());
+  if(STATE.view==='log')   content.appendChild(buildLog());
+  if(STATE.view==='admin'&&STATE.adminUnlocked) content.appendChild(buildAdmin());
+  if(STATE.view==='vol'&&STATE.volUnlocked)     content.appendChild(buildVol());
+
+  app.appendChild(content);
+  app.appendChild(buildNav());
+
+  // Toast
+  if(STATE.toast){
+    const t=div({position:'fixed',bottom:'90px',left:'50%',transform:'translateX(-50%)',
+      background:STATE.toast.color||THEME.green,color:THEME.toast?.color===THEME.yellow?THEME.text:'#fff',
+      padding:'12px 24px',borderRadius:'24px',fontWeight:'700',fontSize:'14px',
+      boxShadow:'0 4px 20px rgba(0,0,0,0.2)',zIndex:'999',whiteSpace:'nowrap',pointerEvents:'none'});
+    t.textContent=STATE.toast.msg;
+    app.appendChild(t);
+  }
+
+  // PIN modal
+  if(STATE.confirmPin) app.appendChild(buildPinModal());
+
+  // Other modals
+  if(STATE.modal){
+    const m=STATE.modal;
+    if(m.type==='camperActivity')  app.appendChild(buildCamperActivityModal(m));
+    if(m.type==='parentPickup')    app.appendChild(buildParentPickupModal(m));
+    if(m.type==='camperQR')        app.appendChild(buildCamperQRModal(m));
+    if(m.type==='staffQR')         app.appendChild(buildStaffQRModal(m));
+    if(m.type==='staffClock')      app.appendChild(buildStaffClockModal(m));
+    if(m.type==='volLogin')        app.appendChild(buildVolLoginModal());
+  }
+
+  app.appendChild(document.createElement('style')).textContent=
+    '*{box-sizing:border-box;}input::placeholder,textarea::placeholder{color:#8EA893;}::-webkit-scrollbar{width:4px;}::-webkit-scrollbar-thumb{background:#B4D8BA;border-radius:2px;}button:hover:not(:disabled){opacity:0.88;}button:active:not(:disabled){transform:scale(0.97);}';
+
+  return app;
+}
+
+// ── BOOT ──────────────────────────────────────────────────────────────────────
+loadData();
+</script>
 </body>
 </html>
